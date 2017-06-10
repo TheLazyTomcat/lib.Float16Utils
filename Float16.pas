@@ -16,6 +16,11 @@
   F16C extension is used when symbol AllowF16CExtension is defined, PurePascal
   is not defined, and when (and only when) it is supported by the CPU and OS.
 
+  Implemented Half should conform to IEEE 754-2008, meaning it has one sign bit
+  (value is negative when sign bit is set, positive otherwise), 5 bits of offset
+  exponent (exponent bias is 15) and 11 bit mantissa (10 bits explicitly stored,
+  highest bit is assumed to be one for non-zero exponent, zero otherwise).
+
   NOTE - type Half is declared in unit AuxTypes, not here.
 
   ©František Milt 2017-06-10
