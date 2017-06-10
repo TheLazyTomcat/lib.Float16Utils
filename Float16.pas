@@ -54,6 +54,8 @@ unit Float16;
 {$ENDIF}
 
 {
+  AllowF16CExtension
+
   When defined, allows the use of F16C extension in ASM. The extension is used
   only when both CPU and OS supports it, otherwise pascal implementation is
   called instead.
@@ -61,11 +63,24 @@ unit Float16;
 }
 {$DEFINE AllowF16CExtension}
 
+{
+  H2S_Lookup
+
+  When defined, pascal implementation of Half to Single conversion is done using
+  large lookup table.
+  This is faster than procedural conversion, but inclusion of the table
+  increases size of the resulting binary by 256KiB and prevents raising of an
+  exception on signaling NaN (it is instead converted to quiet NaN).
+
+  Not defined by default.
+}
+{.$DEFINE H2S_Lookup}
+
 interface
 
 uses
   AuxTypes {contains declaration of type Half};
-
+  
 //==  Public constants  ========================================================
 //------------------------------------------------------------------------------
 
@@ -232,7 +247,15 @@ const
 
 //------------------------------------------------------------------------------
 
-procedure Fce_HalfToSingle_Pas(Input, Output: Pointer); register;
+procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
+{$IFDEF H2S_Lookup}
+{$DEFINE Included}
+  {$INCLUDE '.\Float16_H2S_Lookup.inc'}
+{$UNDEF Included}
+begin
+PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^];
+end;
+{$ELSE}
 var
   Sign:           UInt16;
   Exponent:       Int32;
@@ -256,21 +279,21 @@ var
 
 begin
 MXCSR := GetMXCSR;
-Sign := PUInt16(Input)^ and $8000;
-Exponent := Int32(PUInt16(Input)^ shr 10) and $1F;
-Mantissa := PUInt16(Input)^ and $3FF;
+Sign := PUInt16(HalfPtr)^ and $8000;
+Exponent := Int32(PUInt16(HalfPtr)^ shr 10) and $1F;
+Mantissa := PUInt16(HalfPtr)^ and $3FF;
 case Exponent of
         // zero or subnormal
     0:  If Mantissa <> 0 then
           begin
             // subnormals, normalizing
             MantissaShift := HighZeroCount(Mantissa) + 8;
-            PUInt32(Output)^ := UInt32(UInt32(Sign) shl 16) or
-                                UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
-                                (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
+            PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
+                                   UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
+                                   (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
           end
         // return signed zero
-        else PUInt32(Output)^ := UInt32(Sign shl 16);
+        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16);
 
         // infinity or NaN
   $1F:  If Mantissa <> 0 then
@@ -280,29 +303,30 @@ case Exponent of
                 // signaled NaN
                 If (MXCSR and MXCSR_EInvalidOP) <> 0 then
                   // quiet signed NaN with mantissa
-                  PUInt32(Output)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7FC00000) or
+                  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7FC00000) or
                                       UInt32(UInt32(Mantissa) shl 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with mantissa
-            else PUInt32(Output)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000) or
+            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000) or
                                      UInt32(UInt32(Mantissa) shl 13);
           end
         // signed infinity
-        else PUInt32(Output)^ := UInt32(Sign shl 16) or UInt32($7F800000);
+        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16) or UInt32($7F800000);
 else
   // normal number
-  PUInt32(Output)^ := UInt32(UInt32(Sign) shl 16) or
-                      UInt32(UInt32(Exponent + 112) shl 23) or
-                      UInt32(UInt32(Mantissa) shl 13);
+  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
+                         UInt32(UInt32(Exponent + 112) shl 23) or
+                         UInt32(UInt32(Mantissa) shl 13);
 end;
 end;
+{$ENDIF}
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf_Pas(Input, Output: Pointer); register;
+procedure Fce_SingleToHalf_Pas(SinglePtr, HalfPtr: Pointer); register;
 var
   Sign:       UInt32;
   Exponent:   Int32;
@@ -345,9 +369,9 @@ var
 begin
 MXCSR := GetMXCSR;
 RoundMode := Integer((MXCSR shr 13) and 3);
-Sign := PUInt32(Input)^ and UInt32($80000000);
-Exponent := Int32(PUInt32(Input)^ shr 23) and $FF;
-Mantissa := PUInt32(Input)^ and UInt32($007FFFFF);
+Sign := PUInt32(SinglePtr)^ and UInt32($80000000);
+Exponent := Int32(PUInt32(SinglePtr)^ shr 23) and $FF;
+Mantissa := PUInt32(SinglePtr)^ and UInt32($007FFFFF);
 case Exponent of
         // zero or subnormal
     0:  If Mantissa <> 0 then
@@ -358,16 +382,16 @@ case Exponent of
                 If ((RoundMode = 1{down}) and (Sign <> 0)) or
                    ((RoundMode = 2{up}) and (Sign = 0)) then
                   // convert to smallest representable number
-                  PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16(1)
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
                 else
                   // convert to signed zero
-                  PUInt16(Output)^ := UInt16(Sign shr 16);
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
               end
             // signal underflow
             else raise EUnderflow.Create('Floating point underflow');
           end
         // return signed zero
-        else PUInt16(Output)^ := UInt16(Sign shr 16);
+        else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
 
         // exponent is too small to be represented in half even as subnormal
    1..
@@ -376,10 +400,10 @@ case Exponent of
             If ((RoundMode = 1{down}) and (Sign <> 0)) or
                ((RoundMode = 2{up}) and (Sign = 0)) then
               // convert to smallest representable number
-              PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16(1)
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
             else
               // convert to signed zero
-              PUInt16(Output)^ := UInt16(Sign shr 16);
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
           end
         // signal underflow
         else raise EUnderflow.Create('Floating point underflow');
@@ -387,7 +411,7 @@ case Exponent of
         // result is subnormal value (resulting exponent in half is 0)
   $66..
   $71:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
-         PUInt16(Output)^ := UInt16(Sign shr 16) or
+         PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
            ShiftMantissa(Mantissa or UInt32($00800000),$7E - Exponent)
         else
           // signal underflow
@@ -402,10 +426,10 @@ case Exponent of
                ((RoundMode = 1{down}) and (Sign = 0)) or
                ((RoundMode = 2{up}) and (Sign <> 0)) then
               // convert to largest representable number
-              PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16($7BFF)
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
             else
               // convert to signed infinity
-              PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16($7C00);
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00);
           end
         // signal overflow
         else raise EOverflow.Create('Floating point overflow');
@@ -418,18 +442,18 @@ case Exponent of
                 // signalled NaN
                 If (MXCSR and MXCSR_EInvalidOP) <> 0 then
                   // quiet signed NaN with truncated mantissa
-                  PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16($7E00) or
-                                      UInt16(Mantissa shr 13)
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7E00) or
+                                       UInt16(Mantissa shr 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with truncated mantisssa
-            else PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16($7C00) or
-                                     UInt16(Mantissa shr 13);
+            else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00) or
+                                      UInt16(Mantissa shr 13);
           end
         // signed infinity
-        else PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16($7C00);
+        else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00);
 else
   // representable numbers, normalized value
   Exponent := Exponent - 112;
@@ -437,29 +461,29 @@ else
   Mantissa := ShiftMantissa(Mantissa,13);
   If (Mantissa and UInt32($00000400)) <> 0 then
     Inc(Exponent);
-  PUInt16(Output)^ := UInt16(Sign shr 16) or UInt16((Exponent and $1F) shl 10) or
-                      UInt16(Mantissa and $000003FF);
+  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16((Exponent and $1F) shl 10) or
+                       UInt16(Mantissa and $000003FF);
 end;
 end;
 
 //==============================================================================
 
-procedure Fce_HalfToSingle4x_Pas(Input, Output: Pointer); register;
+procedure Fce_HalfToSingle4x_Pas(HalfPtr, SinglePtr: Pointer); register;
 begin
-Fce_HalfToSingle_Pas(Input,Output);
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 2),{%H-}Pointer({%H-}PtrUInt(Output) + 4));
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 4),{%H-}Pointer({%H-}PtrUInt(Output) + 8));
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 6),{%H-}Pointer({%H-}PtrUInt(Output) + 12));
+Fce_HalfToSingle_Pas(HalfPtr,SinglePtr);
+Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 2),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 4));
+Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 4),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 8));
+Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 6),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 12));
 end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf4x_Pas(Input, Output: Pointer); register;
+procedure Fce_SingleToHalf4x_Pas(SinglePtr, HalfPtr: Pointer); register;
 begin
-Fce_SingleToHalf_Pas(Input,Output);
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 4),{%H-}Pointer({%H-}PtrUInt(Output) + 2));
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 8),{%H-}Pointer({%H-}PtrUInt(Output) + 4));
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(Input) + 12),{%H-}Pointer({%H-}PtrUInt(Output) + 6));
+Fce_SingleToHalf_Pas(SinglePtr,HalfPtr);
+Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 4),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 2));
+Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 8),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 4));
+Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 12),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 6));
 end;
 
 //==============================================================================
