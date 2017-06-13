@@ -49,6 +49,10 @@ unit Float16;
   {$DEFINE Windows}
 {$IFEND}
 
+{$IFDEF ENDIAN_BIG}
+  {$MESSAGE FATAL 'Big-endian system not supported'}
+{$ENDIF}
+
 {$IFDEF FPC}
   {$MODE ObjFPC}{$H+}{$MODESWITCH CLASSICPROCVARS+}
   {$INLINE ON}
