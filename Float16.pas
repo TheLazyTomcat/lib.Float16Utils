@@ -23,9 +23,9 @@
 
   NOTE - type Half is declared in unit AuxTypes, not here.
 
-  ©František Milt 2017-06-10
+  ©František Milt 2017-07-14
 
-  Version 1.0
+  Version 1.0.1
 
   Dependencies:
     AuxTypes    - github.com/ncs-sniper/Lib.AuxTypes
@@ -78,12 +78,12 @@ unit Float16;
   When defined, pascal implementation of Half to Single conversion is done using
   large lookup table.
   This is faster than procedural conversion, but inclusion of the table
-  increases size of the resulting binary by 256KiB and prevents raising of an
+  increases size of the resulting binary by 128KiB and prevents raising of an
   exception on signaling NaN (it is instead converted to quiet NaN).
 
   Not defined by default.
 }
-{.$DEFINE H2S_Lookup}
+{$DEFINE H2S_Lookup}
 
 interface
 
@@ -262,7 +262,8 @@ procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
   {$INCLUDE '.\Float16_H2S_Lookup.inc'}
 {$UNDEF Included}
 begin
-PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^];
+PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and $7FFF] or
+                {sign} (PUInt32(HalfPtr)^ and $00008000) shl 16;
 end;
 {$ELSE}
 var
