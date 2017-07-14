@@ -139,7 +139,7 @@ type
 
 Function Sign(const Value: Half): TValueSign;
 Function Abs(const Value: Half): Half;
-Function Minus(const Value: Half): Half;
+Function Neg(const Value: Half): Half;
 
 //==  Comparison functions  ====================================================
 //------------------------------------------------------------------------------
@@ -178,6 +178,10 @@ operator < (A,B: Half): Boolean; inline;
 operator >= (A,B: Half): Boolean; inline;
 operator <= (A,B: Half): Boolean; inline;
 operator <> (A,B: Half): Boolean; inline;
+
+// unary operators
+operator + (A: Half): Half; inline;
+operator - (A: Half): Half; inline;
 
 // arithmetic operators
 operator + (A,B: Half): Half; inline;
@@ -663,7 +667,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function Minus(const Value: Half): Half;
+Function Neg(const Value: Half): Half;
 var
   _Value:   UInt16 absolute Value;
   _Result:  UInt16 absolute Result;
@@ -810,6 +814,20 @@ end;
 operator <> (A,B: Half): Boolean;
 begin
 Result := not IsEqual(A,B);
+end;
+
+//==============================================================================
+
+operator + (A: Half): Half;
+begin
+Result := A;
+end;
+
+//------------------------------------------------------------------------------
+
+operator - (A: Half): Half;
+begin
+Result := Neg(A);
 end;
 
 //==============================================================================
