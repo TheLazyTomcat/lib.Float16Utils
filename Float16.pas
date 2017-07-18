@@ -83,7 +83,7 @@ unit Float16;
 
   Not defined by default.
 }
-{$DEFINE H2S_Lookup}
+{.$DEFINE H2S_Lookup}
 
 interface
 
@@ -102,6 +102,8 @@ const
 //==  Auxiliary functions  =====================================================
 //------------------------------------------------------------------------------
 
+{$WARN SYMBOL_PLATFORM OFF}
+
 {$IF not Declared(GetMXCSR)}
 {$DEFINE Implement_GetMXCSR}
 Function GetMXCSR: UInt32; {$IFNDEF PurePascal}register; assembler;{$ENDIF}
@@ -111,6 +113,8 @@ Function GetMXCSR: UInt32; {$IFNDEF PurePascal}register; assembler;{$ENDIF}
 {$DEFINE Implement_SetMXCSR}
 procedure SetMXCSR(NewValue: UInt32); {$IFNDEF PurePascal}register; assembler;{$ENDIF}
 {$IFEND}
+
+{$WARN SYMBOL_PLATFORM ON}
 
 //==  Conversion functions  ====================================================
 //------------------------------------------------------------------------------
@@ -292,7 +296,9 @@ var
   end;
 
 begin
+{$WARN SYMBOL_PLATFORM OFF}
 MXCSR := GetMXCSR;
+{$WARN SYMBOL_PLATFORM ON}
 Sign := PUInt16(HalfPtr)^ and $8000;
 Exponent := Int32(PUInt16(HalfPtr)^ shr 10) and $1F;
 Mantissa := PUInt16(HalfPtr)^ and $3FF;
@@ -381,7 +387,9 @@ var
   end;
 
 begin
+{$WARN SYMBOL_PLATFORM OFF}
 MXCSR := GetMXCSR;
+{$WARN SYMBOL_PLATFORM ON}
 RoundMode := Integer((MXCSR shr 13) and 3);
 Sign := PUInt32(SinglePtr)^ and UInt32($80000000);
 Exponent := Int32(PUInt32(SinglePtr)^ shr 23) and $FF;
