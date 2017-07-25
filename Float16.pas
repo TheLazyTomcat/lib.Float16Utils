@@ -563,7 +563,7 @@ asm
 end;
 
 {$IFDEF ASMSuppressSizeWarnings}
-  {$WARN 7122 ON}
+  {$WARN 7121 ON}
   {$WARN 2087 ON}
 {$ENDIF}
 
