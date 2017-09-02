@@ -1,31 +1,3 @@
-{$IFNDEF Included}
-{-------------------------------------------------------------------------------
-
-  This Source Code Form is subject to the terms of the Mozilla Public
-  License, v. 2.0. If a copy of the MPL was not distributed with this
-  file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
--------------------------------------------------------------------------------}
-{===============================================================================
-
-  Float16 - Half to Single lookup table
-
-  Although the table only gets included, it is implemented as a complete unit to
-  ensure it does not affect programming language recognition on git hostings.
-
-  ©František Milt 2017-07-14
-
-  Version 1.0.1
-
-===============================================================================}
-unit Float16_H2S_Lookup;
-
-interface
-
-uses
-  AuxTypes;
-{$ENDIF}
-
 const
   H2S_Lookup: array[0..$7FFF] of UInt32 = (
     $00000000, $33800000, $34000000, $34400000, $34800000, $34A00000, $34C00000, $34E00000,
@@ -4124,12 +4096,3 @@ const
     $7FFD0000, $7FFD2000, $7FFD4000, $7FFD6000, $7FFD8000, $7FFDA000, $7FFDC000, $7FFDE000,
     $7FFE0000, $7FFE2000, $7FFE4000, $7FFE6000, $7FFE8000, $7FFEA000, $7FFEC000, $7FFEE000,
     $7FFF0000, $7FFF2000, $7FFF4000, $7FFF6000, $7FFF8000, $7FFFA000, $7FFFC000, $7FFFE000);
-
-{$IFNDEF Included}
-implementation
-
-{$WARNINGS OFF}
-end.
-{$ENDIF Included}
-{$WARNINGS ON}
-

@@ -266,9 +266,7 @@ const
 
 procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
 {$IFDEF H2S_Lookup}
-{$DEFINE Included}
-  {$INCLUDE '.\Float16_H2S_Lookup.inc'}
-{$UNDEF Included}
+  {$INCLUDE '.\Float16.inc'}
 begin
 PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and $7FFF] or
                 {sign} (PUInt32(HalfPtr)^ and $00008000) shl 16;
