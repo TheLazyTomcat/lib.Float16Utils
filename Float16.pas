@@ -158,7 +158,7 @@ Function IsGreaterOrEqual(const A,B: Half): Boolean;
 //------------------------------------------------------------------------------
 
 Function Add(const A,B: Half): Half;
-Function Substract(const A,B: Half): Half;
+Function Subtract(const A,B: Half): Half;
 Function Multiply(const A,B: Half): Half;
 Function Divide(const A,B: Half): Half;
 
@@ -730,7 +730,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function Substract(const A,B: Half): Half;
+Function Subtract(const A,B: Half): Half;
 begin
 Result := SingleToHalf(HalfToSingle(A) - HalfToSingle(B));
 end;
@@ -847,7 +847,7 @@ end;
 
 operator - (A,B: Half): Half;
 begin
-Result := Substract(A,B);
+Result := Subtract(A,B);
 end;
 
 //------------------------------------------------------------------------------
