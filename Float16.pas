@@ -60,6 +60,7 @@ unit Float16;
     {$ASMMODE Intel}
     {$DEFINE ASMSuppressSizeWarnings}
   {$ENDIF}
+  {$DEFINE FPC_DisableWarns}
 {$ENDIF}
 
 {
@@ -202,6 +203,10 @@ uses
 {$IF Defined(AllowF16CExtension) and not Defined(PurePascal)}
   , SimpleCPUID
 {$IFEND};
+
+{$IFDEF FPC_DisableWarns}
+  {$WARN 4055 OFF} // Conversion between ordinals and pointers is not portable
+{$ENDIF}
 
 //==  Auxiliary functions  =====================================================
 //------------------------------------------------------------------------------
@@ -491,9 +496,9 @@ end;
 procedure Fce_HalfToSingle4x_Pas(HalfPtr, SinglePtr: Pointer); register;
 begin
 Fce_HalfToSingle_Pas(HalfPtr,SinglePtr);
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 2),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 4));
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 4),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 8));
-Fce_HalfToSingle_Pas({%H-}Pointer({%H-}PtrUInt(HalfPtr) + 6),{%H-}Pointer({%H-}PtrUInt(SinglePtr) + 12));
+Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 2),Pointer(PtrUInt(SinglePtr) + 4));
+Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 4),Pointer(PtrUInt(SinglePtr) + 8));
+Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 6),Pointer(PtrUInt(SinglePtr) + 12));
 end;
 
 //------------------------------------------------------------------------------
@@ -501,9 +506,9 @@ end;
 procedure Fce_SingleToHalf4x_Pas(SinglePtr, HalfPtr: Pointer); register;
 begin
 Fce_SingleToHalf_Pas(SinglePtr,HalfPtr);
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 4),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 2));
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 8),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 4));
-Fce_SingleToHalf_Pas({%H-}Pointer({%H-}PtrUInt(SinglePtr) + 12),{%H-}Pointer({%H-}PtrUInt(HalfPtr) + 6));
+Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 4),Pointer(PtrUInt(HalfPtr) + 2));
+Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 8),Pointer(PtrUInt(HalfPtr) + 4));
+Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 12),Pointer(PtrUInt(HalfPtr) + 6));
 end;
 
 //==============================================================================
