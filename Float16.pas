@@ -61,6 +61,7 @@ unit Float16;
     {$DEFINE ASMSuppressSizeWarnings}
   {$ENDIF}
   {$DEFINE FPC_DisableWarns}
+  {$MACRO ON}
 {$ENDIF}
 
 {
@@ -205,7 +206,8 @@ uses
 {$IFEND};
 
 {$IFDEF FPC_DisableWarns}
-  {$WARN 4055 OFF} // Conversion between ordinals and pointers is not portable
+  {$DEFINE FPCDWM}
+  {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
 {$ENDIF}
 
 //==  Auxiliary functions  =====================================================
@@ -496,9 +498,11 @@ end;
 procedure Fce_HalfToSingle4x_Pas(HalfPtr, SinglePtr: Pointer); register;
 begin
 Fce_HalfToSingle_Pas(HalfPtr,SinglePtr);
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
 Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 2),Pointer(PtrUInt(SinglePtr) + 4));
 Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 4),Pointer(PtrUInt(SinglePtr) + 8));
 Fce_HalfToSingle_Pas(Pointer(PtrUInt(HalfPtr) + 6),Pointer(PtrUInt(SinglePtr) + 12));
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
@@ -506,9 +510,11 @@ end;
 procedure Fce_SingleToHalf4x_Pas(SinglePtr, HalfPtr: Pointer); register;
 begin
 Fce_SingleToHalf_Pas(SinglePtr,HalfPtr);
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
 Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 4),Pointer(PtrUInt(HalfPtr) + 2));
 Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 8),Pointer(PtrUInt(HalfPtr) + 4));
 Fce_SingleToHalf_Pas(Pointer(PtrUInt(SinglePtr) + 12),Pointer(PtrUInt(HalfPtr) + 6));
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 end;
 
 //==============================================================================
