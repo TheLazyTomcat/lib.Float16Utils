@@ -23,9 +23,9 @@
 
   NOTE - type Half is declared in unit AuxTypes, not here.
 
-  ©František Milt 2017-07-14
+  ©František Milt 2017-10-21
 
-  Version 1.0.1
+  Version 1.0.2
 
   Dependencies:
     AuxTypes    - github.com/ncs-sniper/Lib.AuxTypes
@@ -45,23 +45,30 @@ unit Float16;
   {$DEFINE PurePascal}
 {$IFEND}
 
-{$IF Defined(WINDOWS) or Defined(MSWINDOWS)}
-  {$DEFINE Windows}
-{$IFEND}
-
 {$IFDEF ENDIAN_BIG}
   {$MESSAGE FATAL 'Big-endian system not supported'}
 {$ENDIF}
 
+{$IF Defined(WINDOWS) or Defined(MSWINDOWS)}
+  {$DEFINE Windows}
+{$IFEND}
+
 {$IFDEF FPC}
   {$MODE ObjFPC}{$H+}{$MODESWITCH CLASSICPROCVARS+}
   {$INLINE ON}
+  {$DEFINE CanInline}
   {$IFNDEF PurePascal}
     {$ASMMODE Intel}
     {$DEFINE ASMSuppressSizeWarnings}
   {$ENDIF}
   {$DEFINE FPC_DisableWarns}
   {$MACRO ON}
+{$ELSE}
+  {$IF CompilerVersion >= 17 then}  // Delphi 2005+
+    {$DEFINE CanInline}
+  {$ELSE}
+    {$UNDEF CanInline}
+  {$IFEND}
 {$ENDIF}
 
 {
@@ -121,21 +128,21 @@ procedure SetMXCSR(NewValue: UInt32); {$IFNDEF PurePascal}register; assembler;{$
 //==  Conversion functions  ====================================================
 //------------------------------------------------------------------------------
 
-Function MapHalfToWord(Value: Half): UInt16;
-Function MapWordToHalf(Value: UInt16): Half;
+Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline; {$ENDIF}
+Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-Function HalfToSingle(Value: Half): Single;
-Function SingleToHalf(Value: Single): Half;
+Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
-procedure HalfToSingle4x(Input, Output: Pointer);
-procedure SingleToHalf4x(Input, Output: Pointer);
+procedure HalfToSingle4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+procedure SingleToHalf4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
 //==  Number information functions  ============================================
 //------------------------------------------------------------------------------
 
-Function IsZero(const Value: Half): Boolean;
-Function IsNaN(const Value: Half): Boolean;
-Function IsInfinite(const Value: Half): Boolean;
+Function IsZero(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsNaN(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsInfinite(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
 //==  Sign-related functions  ==================================================
 //------------------------------------------------------------------------------
@@ -144,25 +151,25 @@ type
   TValueSign = -1..1;
 
 Function Sign(const Value: Half): TValueSign;
-Function Abs(const Value: Half): Half;
-Function Neg(const Value: Half): Half;
+Function Abs(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Neg(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 //==  Comparison functions  ====================================================
 //------------------------------------------------------------------------------
 
-Function IsEqual(const A,B: Half): Boolean;
-Function IsLess(const A,B: Half): Boolean;
-Function IsGreater(const A,B: Half): Boolean;
-Function IsLessOrEqual(const A,B: Half): Boolean;
-Function IsGreaterOrEqual(const A,B: Half): Boolean;
+Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
 //==  Arithmetic functions  ====================================================
 //------------------------------------------------------------------------------
 
-Function Add(const A,B: Half): Half;
-Function Subtract(const A,B: Half): Half;
-Function Multiply(const A,B: Half): Half;
-Function Divide(const A,B: Half): Half;
+Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 //==  Operators overloading  ===================================================
 //------------------------------------------------------------------------------
@@ -170,30 +177,30 @@ Function Divide(const A,B: Half): Half;
 {$IFDEF FPC}
 
 // assignment operators
-operator := (Value: Half): Single; inline;
-operator := (Value: Single): Half; inline;
+operator := (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
+operator := (Value: Single): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 // explicit assignment operators
-operator explicit (Value: Half): Single; inline;
-operator explicit (Value: Single): Half; inline;
+operator explicit (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
+operator explicit (Value: Single): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 // comparison operators
-operator = (A,B: Half): Boolean; inline;
-operator > (A,B: Half): Boolean; inline;
-operator < (A,B: Half): Boolean; inline;
-operator >= (A,B: Half): Boolean; inline;
-operator <= (A,B: Half): Boolean; inline;
-operator <> (A,B: Half): Boolean; inline;
+operator = (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator > (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator < (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator >= (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator <= (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator <> (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
 // unary operators
-operator + (A: Half): Half; inline;
-operator - (A: Half): Half; inline;
+operator + (A: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator - (A: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 // arithmetic operators
-operator + (A,B: Half): Half; inline;
-operator - (A,B: Half): Half; inline;
-operator * (A,B: Half): Half; inline;
-operator / (A,B: Half): Half; inline;
+operator + (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator - (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator * (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator / (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 {$ENDIF}
 
