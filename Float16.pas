@@ -283,7 +283,7 @@ procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
   {$INCLUDE '.\Float16.inc'}
 begin
 PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and $7FFF] or
-                {sign} (PUInt32(HalfPtr)^ and $00008000) shl 16;
+                {sign} UInt32(PUInt16(HalfPtr)^ and $8000) shl 16;
 end;
 {$ELSE}
 var
