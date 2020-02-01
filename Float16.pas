@@ -74,33 +74,40 @@ unit Float16;
 {
   AllowF16CExtension
 
-  When defined, allows the use of F16C extension in ASM. The extension is used
-  only when both CPU and OS supports it, otherwise pascal implementation is
-  called instead.
-  Has no meaning when PurePascal symbol is defined.
+    When defined, allows the use of F16C extension in ASM. The extension is
+    used only when both CPU and OS supports it, otherwise pascal implementation
+    is called instead.
+
+    Has no effect when PurePascal symbol is defined.
+
+  Defined by default.
 }
 {$DEFINE AllowF16CExtension}
 
 {
   H2S_Lookup
 
-  When defined, pascal implementation of Half to Single conversion is done using
-  large lookup table.
-  This is faster than procedural conversion, but inclusion of the table
-  increases size of the resulting binary by 128KiB and prevents raising of an
-  exception on signaling NaN (it is instead converted to quiet NaN).
+    When defined, pascal implementation of Half to Single conversion is done
+    using large lookup table.
+    This is faster than procedural conversion, but inclusion of the table
+    increases size of the resulting binary by about 128KiB and prevents
+    raising of an exception on signaling NaN (it is instead converted to
+    quiet NaN).
 
   Not defined by default.
 }
 {.$DEFINE H2S_Lookup}
 
+{$message 'correct getting roundmode and exception mask - implement switch from FPU/MXCSR'}
+
 interface
 
 uses
   AuxTypes {contains declaration of type Half};
-  
-//==  Public constants  ========================================================
-//------------------------------------------------------------------------------
+
+{===============================================================================
+    Public constants
+===============================================================================}
 
 const
   Infinity: Half = ($00,$7C); // positive infinity
@@ -108,8 +115,9 @@ const
   MaxHalf:  Half = ($FF,$7B); // 65504
   MinHalf:  Half = ($01,$00); // 5.96046e-8
 
-//==  Auxiliary functions  =====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Auxiliary functions - declaration
+===============================================================================}
 
 {$WARN SYMBOL_PLATFORM OFF}
 
@@ -125,8 +133,9 @@ procedure SetMXCSR(NewValue: UInt32); {$IFNDEF PurePascal}register; assembler;{$
 
 {$WARN SYMBOL_PLATFORM ON}
 
-//==  Conversion functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Conversion functions - declaration
+===============================================================================}
 
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline; {$ENDIF}
 Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
@@ -137,15 +146,19 @@ Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(F
 procedure HalfToSingle4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 procedure SingleToHalf4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
-//==  Number information functions  ============================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Number information functions - declaration
+===============================================================================}
 
 Function IsZero(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsNaN(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsInfinite(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsDenormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}{$message 'test'}
+Function IsNormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}{$message 'test'}
 
-//==  Sign-related functions  ==================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Sign-related functions - declaration
+===============================================================================}
 
 type
   TValueSign = -1..1;
@@ -154,8 +167,9 @@ Function Sign(const Value: Half): TValueSign;
 Function Abs(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Neg(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Comparison functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Comparison functions - declaration
+===============================================================================}
 
 Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
@@ -163,18 +177,19 @@ Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Arithmetic functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Arithmetic functions - declaration
+===============================================================================}
 
 Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Operators overloading  ===================================================
-//------------------------------------------------------------------------------
-
 {$IFDEF FPC}
+{===============================================================================
+    Operators overloading - declaration
+===============================================================================}
 
 // assignment operators
 operator := (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
@@ -217,8 +232,9 @@ uses
   {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
 {$ENDIF}
 
-//==  Auxiliary functions  =====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Auxiliary functions - implementation
+===============================================================================}
 
 {$IF (Defined(Implement_GetMXCSR) or Defined(Implement_SetMXCSR)) and Defined(PurePascal)}
 var
@@ -268,8 +284,28 @@ end;
 {$ENDIF}
 {$ENDIF}
 
-//==  Conversion functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Conversion functions - implementation
+===============================================================================}
+{
+  Single
+
+      31 30       22                      0
+       |-|--------|-----------------------|
+
+     0..22 (23 bits)  - mantissa (implicit bit 24 is 1 when exponent is nonzero, 0 otherwise)
+    23..30 (8 bits)   - exponent (bias 127)
+        31 (1 bit)    - sign (1 = negative number, 0 = positive number)
+
+  Half
+
+      15 14    9          0
+       |-|-----|----------|
+
+      0..9 (10 bits)  - mantissa (implicit bit 10 is 1 when exponent is nonzero, 0 otherwise)
+    10..14 (5 bits)   - exponent (bias 15)
+        15 (1 bit)    - sign (1 = negative number, 0 = positive nümber) 
+}
 
 const
   MXCSR_EInvalidOP = UInt32($00000080);
@@ -278,29 +314,29 @@ const
 
 //------------------------------------------------------------------------------
 
-procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
+procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 {$IFDEF H2S_Lookup}
   {$INCLUDE '.\Float16.inc'}
 begin
 PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and $7FFF] or
-                {sign} UInt32(PUInt16(HalfPtr)^ and $8000) shl 16;
+                {sign} (UInt32(PUInt16(HalfPtr)^ and $8000) shl 16);
 end;
 {$ELSE}
 var
-  Sign:           UInt16;
-  Exponent:       Int32;
-  Mantissa:       UInt16;
-  MantissaShift:  Integer;
+  Sign:           UInt32;
+  Exponent:       UInt32;
+  Mantissa:       UInt32;
+  MantissaShift:  UInt32;
   MXCSR:          UInt32;
 
-  Function HighZeroCount(aValue: UInt16): Integer;
+  Function HighZeroCount(Value: UInt16): UInt32;
   begin
-    If aValue <> 0 then
+    If Value <> 0 then
       begin
         Result := 0;
-        while (aValue and UInt16($8000)) = 0  do
+        while (Value and UInt16($8000)) = 0  do
           begin
-            aValue := UInt16(aValue shl 1);
+            Value := Value shl 1;
             Inc(Result);
           end;
       end
@@ -311,47 +347,60 @@ begin
 {$WARN SYMBOL_PLATFORM OFF}
 MXCSR := GetMXCSR;
 {$WARN SYMBOL_PLATFORM ON}
-Sign := PUInt16(HalfPtr)^ and $8000;
-Exponent := Int32(PUInt16(HalfPtr)^ shr 10) and $1F;
-Mantissa := PUInt16(HalfPtr)^ and $3FF;
+Sign := UInt32(PUInt16(HalfPtr)^ and $8000);
+Exponent := UInt32((PUInt16(HalfPtr)^ shr 10) and $1F);
+Mantissa := UInt32(PUInt16(HalfPtr)^ and $3FF);
 case Exponent of
-        // zero or subnormal
+        // zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // subnormals, normalizing
-            MantissaShift := HighZeroCount(Mantissa) + 8;
-            PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
-                                   UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
-                                   (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
+          {
+            denormals, normalizing
+
+              mantissa here is non-zero, so it always has at least one bit set
+
+              exponent for denormal values is not actually stored, it is
+              implied to be lowest possible exponent that would not produce 0
+              when biased, for half it is -14
+              
+              we normalize the mantissa by shifting it so that the highest set
+              bit is shifted out left to an imlicit (not stored) bit
+              while doing so, we have to decrease the exponent by one for every
+              place the mantissa is left-shifted
+
+              the new exponent for 32bit float is the  old exponent (-14) minus
+              number of places needed to left shift highest set bit to position
+              11 (implicit integer bit), so 127 - 14 - (MantissaShift - 6)
+          }
+            MantissaShift := HighZeroCount(UInt16(Mantissa));
+            PUInt32(SinglePtr)^ := (Sign shl 16) or ((119 - MantissaShift) shl 23) or
+                                   ((Mantissa shl (MantissaShift + 8)) and UInt32($007FFFFF));
           end
         // return signed zero
-        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16);
+        else PUInt32(SinglePtr)^ := Sign shl 16;
 
         // infinity or NaN
   $1F:  If Mantissa <> 0 then
           begin
-            If (Mantissa and UInt16($0200)) = 0 then
+            // is highest bit (9) of mantissa clear or set?
+            If (Mantissa and UInt32($0200)) = 0 then
               begin
                 // signaled NaN
                 If (MXCSR and MXCSR_EInvalidOP) <> 0 then
                   // quiet signed NaN with mantissa
-                  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7FC00000) or
-                                      UInt32(UInt32(Mantissa) shl 13)
+                  PUInt32(SinglePtr)^ := (Sign shl 16) or UInt32($7FC00000) or (Mantissa shl 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with mantissa
-            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000) or
-                                     UInt32(UInt32(Mantissa) shl 13);
+            else PUInt32(SinglePtr)^ := (Sign shl 16) or UInt32($7F800000) or (Mantissa shl 13);
           end
         // signed infinity
-        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16) or UInt32($7F800000);
+        else PUInt32(SinglePtr)^ := (Sign shl 16) or UInt32($7F800000);
 else
   // normal number
-  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
-                         UInt32(UInt32(Exponent + 112) shl 23) or
-                         UInt32(UInt32(Mantissa) shl 13);
+  PUInt32(SinglePtr)^ := (Sign shl 16) or ((Exponent + 112) shl 23) or (Mantissa shl 13);
 end;
 end;
 {$ENDIF}
@@ -361,7 +410,7 @@ end;
 procedure Fce_SingleToHalf_Pas(SinglePtr, HalfPtr: Pointer); register;
 var
   Sign:       UInt32;
-  Exponent:   Int32;
+  Exponent:   UInt32;
   Mantissa:   UInt32;
   MXCSR:      UInt32;
   RoundMode:  Integer;
@@ -379,7 +428,7 @@ var
         case RoundMode of
               // nearest
           0:  If ShiftedOut <> 0 then
-                begin
+                begin {$message 'check'}
                   If Shift >= 32 then Distance := UInt32(-Int32(ShiftedOut))
                     else Distance := UInt32((UInt32(1) shl Shift) - ShiftedOut);
                   If (Distance < ShiftedOut) or ((Distance = ShiftedOut) and ((Result and 1) <> 0)) then
@@ -402,15 +451,23 @@ begin
 {$WARN SYMBOL_PLATFORM OFF}
 MXCSR := GetMXCSR;
 {$WARN SYMBOL_PLATFORM ON}
+{
+  Rounding modes
+
+    00 - round to nearest
+    01 - round down
+    10 - round up
+    11 - round towards zero
+}
 RoundMode := Integer((MXCSR shr 13) and 3);
 Sign := PUInt32(SinglePtr)^ and UInt32($80000000);
-Exponent := Int32(PUInt32(SinglePtr)^ shr 23) and $FF;
+Exponent := UInt32(PUInt32(SinglePtr)^ shr 23) and $FF;
 Mantissa := PUInt32(SinglePtr)^ and UInt32($007FFFFF);
 case Exponent of
-        // zero or subnormal
+        // zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // subnormal
+            // denormal
             If (MXCSR and MXCSR_EUnderflow) <> 0 then
               begin
                 If ((RoundMode = 1{down}) and (Sign <> 0)) or
@@ -427,9 +484,9 @@ case Exponent of
         // return signed zero
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
 
-        // exponent is too small to be represented in half even as subnormal
-   1..
-  $65:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
+        // exponent is too small to be represented in half even as denormal
+   1..  {$message 're-check'}
+  $66:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
           begin
             If ((RoundMode = 1{down}) and (Sign <> 0)) or
                ((RoundMode = 2{up}) and (Sign = 0)) then
@@ -442,18 +499,18 @@ case Exponent of
         // signal underflow
         else raise EUnderflow.Create('Floating point underflow');
 
-        // result is subnormal value (resulting exponent in half is 0)
-  $66..
-  $71:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
-         PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
-           ShiftMantissa(Mantissa or UInt32($00800000),$7E - Exponent)
+        // result is denormal value (resulting exponent in half is 0)
+  $67.. {$message 'check'}
+  $70:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
+          PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
+                               ShiftMantissa(Mantissa or UInt32($00800000),$7E - Exponent)
         else
           // signal underflow
           raise EUnderflow.Create('Floating point underflow');
 
-        // exponent is too large to be represented in half (resulting exponent
-        // would be larger than $1E)
-  $8F..
+        // exponent is too large to be represented in half (resulting biased
+        // exponent would be larger than $1E)
+  $8F.. {$message 'check'}
   $FE:  If (MXCSR and MXCSR_EOverflow) <> 0 then
           begin
             If (RoundMode = 3{trunc}) or
@@ -471,6 +528,7 @@ case Exponent of
         // special cases (INF, NaN, ...)
   $FF:  If Mantissa <> 0 then
           begin
+            // not a number
             If (Mantissa and UInt32($00400000)) = 0 then
               begin
                 // signalled NaN
@@ -488,7 +546,7 @@ case Exponent of
           end
         // signed infinity
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00);
-else
+else  {$message 'check'}
   // representable numbers, normalized value
   Exponent := Exponent - 112;
   // mantissa shift correction
@@ -588,10 +646,10 @@ end;
 //==============================================================================
 
 var
-  Var_HalfToSingle:   procedure(Input, Output: Pointer); register;
-  Var_SingleToHalf:   procedure(Input, Output: Pointer); register;
-  Var_HalfToSingle4x: procedure(Input, Output: Pointer); register;
-  Var_SingleToHalf4x: procedure(Input, Output: Pointer); register;
+  Var_HalfToSingle:   procedure(Input,Output: Pointer); register;
+  Var_SingleToHalf:   procedure(Input,Output: Pointer); register;
+  Var_HalfToSingle4x: procedure(Input,Output: Pointer); register;
+  Var_SingleToHalf4x: procedure(Input,Output: Pointer); register;
 
 
 Function MapHalfToWord(Value: Half): UInt16;
@@ -634,8 +692,9 @@ begin
 Var_SingleToHalf4x(Input,Output);
 end;
 
-//==  Number information functions  ============================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Number information functions - implementation
+===============================================================================}
 
 Function IsZero(const Value: Half): Boolean;
 var
@@ -662,8 +721,27 @@ begin
 Result := ((_Value and UInt16($7C00)) = $7C00) and ((_Value and UInt16($03FF)) = 0);
 end;
 
-//==  Sign-related functions  ==================================================
 //------------------------------------------------------------------------------
+
+Function IsDenormal(const Value: Half): Boolean;
+var
+  _Value: UInt16 absolute Value;
+begin
+Result := ((_Value and UInt16($7C00)) = 0) and ((_Value and UInt16($03FF)) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsNormal(const Value: Half): Boolean;
+var
+  _Value: UInt16 absolute Value;
+begin
+Result := ((_Value and UInt16($7C00)) > 0) and ((_Value and UInt16($7C00)) < $1F); correct
+end;
+
+{===============================================================================
+    Sign-related functions - implementation
+===============================================================================}
 
 Function Sign(const Value: Half): TValueSign;
 var
@@ -699,8 +777,9 @@ begin
 _Result := _Value xor UInt16($8000);
 end;
 
-//==  Comparison functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Comparison functions - implementation
+===============================================================================}
 
 Function IsEqual(const A,B: Half): Boolean;
 var
@@ -738,8 +817,9 @@ begin
 Result := HalfToSingle(A) >= HalfToSingle(B);
 end;
 
-//==  Arithmetic functions  ====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Arithmetic functions - implementation
+===============================================================================}
 
 Function Add(const A,B: Half): Half;
 begin
@@ -767,10 +847,10 @@ begin
 Result := SingleToHalf(HalfToSingle(A) / HalfToSingle(B));
 end;
 
-//==  Operators overloading  ===================================================
-//------------------------------------------------------------------------------
-
 {$IFDEF FPC}
+{===============================================================================
+    Operators overloading - implementation
+===============================================================================}
 
 operator := (Value: Half): Single;
 begin
@@ -884,8 +964,9 @@ end;
 
 {$ENDIF}
 
-//==  Unit initialization  =====================================================
-//------------------------------------------------------------------------------
+{===============================================================================
+    Unit initialization
+===============================================================================}
 
 procedure LoadDefaultFunctions;
 begin
