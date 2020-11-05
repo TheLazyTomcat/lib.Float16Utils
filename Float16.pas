@@ -36,6 +36,18 @@
 
 ===============================================================================}
 unit Float16;
+{
+  Float16_PurePascal
+
+  If you want to compile this unit without ASM, don't want to or cannot define
+  PurePascal for the entire project and at the same time you don't want to or
+  cannot make changes to this unit, define this symbol for the entire project
+  and this unit will be compiled in PurePascal mode.
+}
+{$DEFINE Float16_PurePascal}{$message 'remove'}
+{$IFDEF Float16_PurePascal}
+  {$DEFINE PurePascal}
+{$ENDIF}
 
 {$IF defined(CPUX86_64) or defined(CPUX64)}
   {$DEFINE x64}
@@ -49,12 +61,8 @@ unit Float16;
   {$MESSAGE FATAL 'Big-endian system not supported'}
 {$ENDIF}
 
-{$IF Defined(WINDOWS) or Defined(MSWINDOWS)}
-  {$DEFINE Windows}
-{$IFEND}
-
 {$IFDEF FPC}
-  {$MODE ObjFPC}{$H+}{$MODESWITCH CLASSICPROCVARS+}
+  {$MODE ObjFPC}{$MODESWITCH CLASSICPROCVARS+}
   {$INLINE ON}
   {$DEFINE CanInline}
   {$IFNDEF PurePascal}
@@ -70,6 +78,7 @@ unit Float16;
     {$UNDEF CanInline}
   {$IFEND}
 {$ENDIF}
+{$H+}
 
 {
   AllowF16CExtension
@@ -78,6 +87,8 @@ unit Float16;
   only when both CPU and OS supports it, otherwise pascal implementation is
   called instead.
   Has no meaning when PurePascal symbol is defined.
+
+  Defined by default.
 }
 {$DEFINE AllowF16CExtension}
 
@@ -97,36 +108,80 @@ unit Float16;
 interface
 
 uses
+  SysUtils,
   AuxTypes {contains declaration of type Half};
-  
-//==  Public constants  ========================================================
-//------------------------------------------------------------------------------
 
+type
+  // library-specific exceptions
+  EF16Exception = class(Exception);
+
+  EF16InvalidFlag     = class(EF16Exception);  
+  EF16UnknownFunction = class(EF16Exception);
+
+{-------------------------------------------------------------------------------
+    Public constants
+-------------------------------------------------------------------------------}
 const
   Infinity: Half = ($00,$7C); // positive infinity
   NaN:      Half = ($00,$7E); // quiet NaN
   MaxHalf:  Half = ($FF,$7B); // 65504
   MinHalf:  Half = ($01,$00); // 5.96046e-8
 
-//==  Auxiliary functions  =====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Auxiliary functions
+-------------------------------------------------------------------------------}
 
-{$WARN SYMBOL_PLATFORM OFF}
+const
+  // MXCSR masks
+  MXCSR_EXC_InvalidOP = UInt32($00000001);
+  MXCSR_EXC_Denormal  = UInt32($00000002);
+  MXCSR_EXC_DivByZero = UInt32($00000004);
+  MXCSR_EXC_Overflow  = UInt32($00000008);
+  MXCSR_EXC_Underflow = UInt32($00000010);
+  MXCSR_EXC_Precision = UInt32($00000020);
 
-{$IF not Declared(GetMXCSR)}
-{$DEFINE Implement_GetMXCSR}
+  MXCSR_EMASK_InvalidOP = UInt32($00000080);
+  MXCSR_EMASK_Denormal  = UInt32($00000100);
+  MXCSR_EMASK_DivByZero = UInt32($00000200);
+  MXCSR_EMASK_Overflow  = UInt32($00000400);
+  MXCSR_EMASK_Underflow = UInt32($00000800);
+  MXCSR_EMASK_Precision = UInt32($00001000);
+
+  MXCSR_DenormalsAreZero = UInt32($00000040);
+  MXCSR_FlushToZero      = UInt32($00008000);
+
+  MXCSR_Rounding = UInt32($00006000);
+
+Function EmulatedMXCSR: Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+
 Function GetMXCSR: UInt32; {$IFNDEF PurePascal}register; assembler;{$ENDIF}
-{$IFEND}
-
-{$IF not Declared(SetMXCSR)}
-{$DEFINE Implement_SetMXCSR}
 procedure SetMXCSR(NewValue: UInt32); {$IFNDEF PurePascal}register; assembler;{$ENDIF}
-{$IFEND}
 
-{$WARN SYMBOL_PLATFORM ON}
+type
+  TSSERoundingMode = (rmNearest,rmDown,rmUp,rmTruncate);
 
-//==  Conversion functions  ====================================================
-//------------------------------------------------------------------------------
+{
+  flE* - exception signals
+  flM* - exception masks
+}
+  TSSEFlag = (flEInvalidOp,flEDenormal,flEDivByZero,flEOverflow,flEUnderflow,
+              flEPrecision,flMInvalidOp,flMDenormal,flMDivByZero,flMOverflow,
+              flMUnderflow,flMPrecision,flDenormalsAreZero,flFlushToZero);
+
+  TSSEFlags = set of TSSEFlag;
+
+Function GetSSERoundingMode: TSSERoundingMode;
+Function SetSSERoundingMode(NewValue: TSSERoundingMode): TSSERoundingMode;
+
+Function GetSSEFlag(Flag: TSSEFlag): Boolean;
+Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
+
+Function GetSSEFlags: TSSEFlags;
+procedure SetSSEFlags(NewValue: TSSEFlags);
+
+{-------------------------------------------------------------------------------
+    Conversion functions
+-------------------------------------------------------------------------------}
 
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline; {$ENDIF}
 Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
@@ -134,18 +189,23 @@ Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
-procedure HalfToSingle4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-procedure SingleToHalf4x(Input, Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+procedure HalfToSingle4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
-//==  Number information functions  ============================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Number information functions
+-------------------------------------------------------------------------------}
 
 Function IsZero(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsNaN(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsInfinite(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+{$message 'implement'}
+//Function IsNormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+//Function IsDenormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Sign-related functions  ==================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Sign-related functions
+-------------------------------------------------------------------------------}
 
 type
   TValueSign = -1..1;
@@ -154,8 +214,9 @@ Function Sign(const Value: Half): TValueSign;
 Function Abs(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Neg(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Comparison functions  ====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Comparison functions
+-------------------------------------------------------------------------------}
 
 Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
@@ -163,18 +224,19 @@ Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Arithmetic functions  ====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Arithmetic functions
+-------------------------------------------------------------------------------}
 
 Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-//==  Operators overloading  ===================================================
-//------------------------------------------------------------------------------
-
 {$IFDEF FPC}
+{-------------------------------------------------------------------------------
+    Overloaded operators (FPC only)
+-------------------------------------------------------------------------------}
 
 // assignment operators
 operator := (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
@@ -204,31 +266,88 @@ operator / (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 {$ENDIF}
 
+{===============================================================================
+    Unit implementation routines
+===============================================================================}
+
+type
+  TFloat16Functions = (fnHalfToSingle,fnSingleToHalf,fnHalfToSingle4x,fnSingleToHalf4x);
+
+{
+  Returns true when selected function is currently set to asm-implemented code,
+  false otherwise.
+}
+Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
+
+{
+  Routes selected function to pascal implementation.
+}
+procedure Float16FunctionPas(Func: TFloat16Functions);
+{
+  Routes selected function to assembly implementation.
+  Does nothing when PurePascal symbol is defined.
+}
+procedure Float16FunctionAsm(Func: TFloat16Functions);
+
+{
+  Calls Float16FunctionAsm for selected function when AssignASM is set to true
+  and PurePascal symbol is NOT defined, otherwise it calls Float16FunctionPas.
+}
+procedure Float16FunctionAssign(Func: TFloat16Functions; AssignASM: Boolean);
+
+{===============================================================================
+    For gebugging purposes...
+===============================================================================}
+
+procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
+procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
+
 implementation
 
-uses
-  SysUtils
 {$IF Defined(AllowF16CExtension) and not Defined(PurePascal)}
-  , SimpleCPUID
-{$IFEND};
+uses
+  SimpleCPUID;
+{$IFEND}
 
 {$IFDEF FPC_DisableWarns}
   {$DEFINE FPCDWM}
   {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
 {$ENDIF}
 
-//==  Auxiliary functions  =====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Internal constants
+-------------------------------------------------------------------------------}
 
-{$IF (Defined(Implement_GetMXCSR) or Defined(Implement_SetMXCSR)) and Defined(PurePascal)}
+const
+  F16_MASK_SIGN = UInt16($8000);
+  F16_MASK_EXP  = UInt16($7C00);  // exponent
+  F16_MASK_FRAC = UInt16($03FF);  // fraction/mantissa
+  F16_MASK_NSGN = UInt16($7FFF);  // non-sign bits
+  F16_MASK_FHB  = UInt16($0200);  // highest bit of the mantissa
+
+{-------------------------------------------------------------------------------
+    Auxiliary functions
+-------------------------------------------------------------------------------}
+
+{$IFDEF PurePascal}
 var
   // rounding set to nearest; masked precission, underflow and denormal exceptions
   Pas_MXCSR: UInt32 = $00001900;
-{$IFEND}
+{$ENDIF}
 
 //------------------------------------------------------------------------------
 
-{$IFDEF Implement_GetMXCSR}
+Function EmulatedMXCSR: Boolean;
+begin
+{$IFDEF PurePascal}
+Result := True;
+{$ELSE}
+Result := False;
+{$ENDIF}
+end;
+
+//------------------------------------------------------------------------------
+
 Function GetMXCSR: UInt32; {$IFNDEF PurePascal}register; assembler;
 var
   Temp: UInt32;
@@ -241,11 +360,9 @@ begin
 Result := Pas_MXCSR;
 end;
 {$ENDIF}
-{$ENDIF}
 
 //------------------------------------------------------------------------------
 
-{$IFDEF Implement_SetMXCSR}
 procedure SetMXCSR(NewValue: UInt32); {$IFNDEF PurePascal}register; assembler;
 var
   Temp: UInt32;
@@ -266,32 +383,143 @@ begin
 Pas_MXCSR := NewValue;
 end;
 {$ENDIF}
-{$ENDIF}
-
-//==  Conversion functions  ====================================================
-//------------------------------------------------------------------------------
-
-const
-  MXCSR_EInvalidOP = UInt32($00000080);
-  MXCSR_EOverflow  = UInt32($00000400);
-  MXCSR_EUnderflow = UInt32($00000800);
 
 //------------------------------------------------------------------------------
 
-procedure Fce_HalfToSingle_Pas(HalfPtr, SinglePtr: Pointer); register;
+Function GetSSERoundingMode: TSSERoundingMode;
+begin
+case (GetMXCSR and MXCSR_Rounding) shr 13 of
+  1:  Result := rmDown;
+  2:  Result := rmUp;
+  3:  Result := rmTruncate;
+else
+  Result := rmNearest;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SetSSERoundingMode(NewValue: TSSERoundingMode): TSSERoundingMode;
+var
+  Num:  UInt32;
+begin
+case NewValue of
+  rmDown:     Num := 1;
+  rmUp:       Num := 2;
+  rmTruncate: Num := 3;
+else
+  Num := 0;
+end;
+SetMXCSR((GetMXCSR and not MXCSR_Rounding) or (Num shl 13));
+end;
+
+//------------------------------------------------------------------------------
+
+Function GetSSEFlag(Flag: TSSEFlag): Boolean;
+begin
+case Flag of
+  flEInvalidOp:       Result := (GetMXCSR and MXCSR_EXC_InvalidOP) <> 0;
+  flEDenormal:        Result := (GetMXCSR and MXCSR_EXC_Denormal) <> 0;
+  flEDivByZero:       Result := (GetMXCSR and MXCSR_EXC_DivByZero) <> 0;
+  flEOverflow:        Result := (GetMXCSR and MXCSR_EXC_Overflow) <> 0;
+  flEUnderflow:       Result := (GetMXCSR and MXCSR_EXC_Underflow) <> 0;
+  flEPrecision:       Result := (GetMXCSR and MXCSR_EXC_Precision) <> 0;
+  flMInvalidOp:       Result := (GetMXCSR and MXCSR_EMASK_InvalidOP) <> 0;
+  flMDenormal:        Result := (GetMXCSR and MXCSR_EMASK_Denormal) <> 0;
+  flMDivByZero:       Result := (GetMXCSR and MXCSR_EMASK_DivByZero) <> 0;
+  flMOverflow:        Result := (GetMXCSR and MXCSR_EMASK_Overflow) <> 0;
+  flMUnderflow:       Result := (GetMXCSR and MXCSR_EMASK_Underflow) <> 0;
+  flMPrecision:       Result := (GetMXCSR and MXCSR_EMASK_Precision) <> 0;
+  flDenormalsAreZero: Result := (GetMXCSR and MXCSR_DenormalsAreZero) <> 0;
+  flFlushToZero:      Result := (GetMXCSR and MXCSR_FlushToZero) <> 0;
+else
+  raise EF16InvalidFlag.CreateFmt('GetSSEFlag: Invalid flag (%d).',[Ord(Flag)]);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
+
+  procedure SetFlag(FlagMask: UInt32);
+  begin
+    If NewValue then
+      SetMXCSR(GetMXCSR or FlagMask)
+    else
+      SetMXCSR(GetMXCSR and not FlagMask);
+  end;
+  
+begin
+Result := GetSSEFlag(Flag);
+case Flag of
+  flEInvalidOp:       SetFlag(MXCSR_EXC_InvalidOP);
+  flEDenormal:        SetFlag(MXCSR_EXC_Denormal);
+  flEDivByZero:       SetFlag(MXCSR_EXC_DivByZero);
+  flEOverflow:        SetFlag(MXCSR_EXC_Overflow);
+  flEUnderflow:       SetFlag(MXCSR_EXC_Underflow);
+  flEPrecision:       SetFlag(MXCSR_EXC_Precision);
+  flMInvalidOp:       SetFlag(MXCSR_EMASK_InvalidOP);
+  flMDenormal:        SetFlag(MXCSR_EMASK_Denormal);
+  flMDivByZero:       SetFlag(MXCSR_EMASK_DivByZero);
+  flMOverflow:        SetFlag(MXCSR_EMASK_Overflow);
+  flMUnderflow:       SetFlag(MXCSR_EMASK_Underflow);
+  flMPrecision:       SetFlag(MXCSR_EMASK_Precision);
+  flDenormalsAreZero: SetFlag(MXCSR_DenormalsAreZero);
+  flFlushToZero:      SetFlag(MXCSR_FlushToZero);
+else
+  raise EF16InvalidFlag.CreateFmt('SetSSEFlag: Invalid flag (%d).',[Ord(Flag)]);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function GetSSEFlags: TSSEFlags;
+var
+  i:  TSSEFlag;
+begin
+Result := [];
+For i := Low(TSSEFlag) to High(TSSEFlag) do
+  If GetSSEFlag(i) then
+    Include(Result,i);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SetSSEFlags(NewValue: TSSEFlags);
+begin
+SetSSEFlag(flEInvalidOp,flEInvalidOp in NewValue);
+SetSSEFlag(flEDenormal,flEDenormal in NewValue);
+SetSSEFlag(flEDivByZero,flEDivByZero in NewValue);
+SetSSEFlag(flEOverflow,flEOverflow in NewValue);
+SetSSEFlag(flEUnderflow,flEUnderflow in NewValue);
+SetSSEFlag(flEPrecision,flEPrecision in NewValue);
+SetSSEFlag(flMInvalidOp,flMInvalidOp in NewValue);
+SetSSEFlag(flMDenormal,flMDenormal in NewValue);
+SetSSEFlag(flMDivByZero,flMDivByZero in NewValue);
+SetSSEFlag(flMOverflow,flMOverflow in NewValue);
+SetSSEFlag(flMUnderflow,flMUnderflow in NewValue);
+SetSSEFlag(flMPrecision,flMPrecision in NewValue);
+SetSSEFlag(flDenormalsAreZero,flDenormalsAreZero in NewValue);
+SetSSEFlag(flFlushToZero,flFlushToZero in NewValue);
+end;
+
+{-------------------------------------------------------------------------------
+    Conversion functions
+-------------------------------------------------------------------------------}
+
+procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 {$IFDEF H2S_Lookup}
   {$INCLUDE '.\Float16.inc'}
 begin
-PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and $7FFF] or
-                {sign} UInt32(PUInt16(HalfPtr)^ and $8000) shl 16;
+PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and F16_MASK_NSGN] or
+                {sign} UInt32(PUInt16(HalfPtr)^ and F16_MASK_SIGN) shl 16;
 end;
 {$ELSE}
 var
   Sign:           UInt16;
-  Exponent:       Int32;
+  Exponent:       Int32;  // biased exponent (true exponent + 15)
   Mantissa:       UInt16;
   MantissaShift:  Integer;
-  MXCSR:          UInt32;
 
   Function HighZeroCount(aValue: UInt16): Integer;
   begin
@@ -308,45 +536,49 @@ var
   end;
 
 begin
-{$WARN SYMBOL_PLATFORM OFF}
-MXCSR := GetMXCSR;
-{$WARN SYMBOL_PLATFORM ON}
-Sign := PUInt16(HalfPtr)^ and $8000;
-Exponent := Int32(PUInt16(HalfPtr)^ shr 10) and $1F;
-Mantissa := PUInt16(HalfPtr)^ and $3FF;
+Sign := PUInt16(HalfPtr)^ and F16_MASK_SIGN;
+Exponent := Int32((PUInt16(HalfPtr)^ and F16_MASK_EXP) shr 10);
+Mantissa := PUInt16(HalfPtr)^ and F16_MASK_FRAC;
 case Exponent of
-        // zero or subnormal
+        // zero exponent - zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // subnormals, normalizing
+          {
+            denormal, normalize...
+
+            ...shift mantissa left so that its highest set bit will be shifted
+            to implicit integer bit (bit 23), also correct exponent to reflect
+            this change
+          }
             MantissaShift := HighZeroCount(Mantissa) + 8;
             PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
                                    UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
-                                   (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
+                                  (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
           end
-        // return signed zero
+        // zero, return signed zero
         else PUInt32(SinglePtr)^ := UInt32(Sign shl 16);
 
-        // infinity or NaN
+        // max esponent - infinity or NaN
   $1F:  If Mantissa <> 0 then
           begin
-            If (Mantissa and UInt16($0200)) = 0 then
+            // not a number
+            If (Mantissa and F16_MASK_FHB) = 0 then
               begin
                 // signaled NaN
-                If (MXCSR and MXCSR_EInvalidOP) <> 0 then
+                If GetSSEFlag(flMInvalidOp) then
                   // quiet signed NaN with mantissa
                   PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7FC00000) or
-                                      UInt32(UInt32(Mantissa) shl 13)
+                                         UInt32(UInt32(Mantissa) shl 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with mantissa
             else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000) or
-                                     UInt32(UInt32(Mantissa) shl 13);
+                                        UInt32(UInt32(Mantissa) shl 13);
           end
-        // signed infinity
-        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16) or UInt32($7F800000);
+        // infinity - return signed infinity
+        else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000);
 else
   // normal number
   PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
@@ -358,14 +590,14 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf_Pas(SinglePtr, HalfPtr: Pointer); register;
-var
-  Sign:       UInt32;
-  Exponent:   Int32;
-  Mantissa:   UInt32;
-  MXCSR:      UInt32;
-  RoundMode:  Integer;
-
+procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
+//var
+//  Sign:       UInt32;
+//  Exponent:   Int32;
+//  Mantissa:   UInt32;
+//  MXCSR:      UInt32;
+//  RoundMode:  Integer;
+(*
   Function ShiftMantissa(Value: UInt32; Shift: Byte): UInt32;
   var
     ShiftedOut: UInt32;
@@ -397,8 +629,9 @@ var
       end
     else Result := Value;
   end;
-
+*)
 begin
+(*
 {$WARN SYMBOL_PLATFORM OFF}
 MXCSR := GetMXCSR;
 {$WARN SYMBOL_PLATFORM ON}
@@ -498,11 +731,12 @@ else
   PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16((Exponent and $1F) shl 10) or
                        UInt16(Mantissa and $000003FF);
 end;
+*)
 end;
 
 //==============================================================================
 
-procedure Fce_HalfToSingle4x_Pas(HalfPtr, SinglePtr: Pointer); register;
+procedure Fce_HalfToSingle4x_Pas(HalfPtr,SinglePtr: Pointer); register;
 begin
 Fce_HalfToSingle_Pas(HalfPtr,SinglePtr);
 {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
@@ -514,7 +748,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf4x_Pas(SinglePtr, HalfPtr: Pointer); register;
+procedure Fce_SingleToHalf4x_Pas(SinglePtr,HalfPtr: Pointer); register;
 begin
 Fce_SingleToHalf_Pas(SinglePtr,HalfPtr);
 {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
@@ -529,14 +763,13 @@ end;
 {$IFNDEF PurePascal}
 
 {$IFDEF ASMSuppressSizeWarnings}
-  {$WARN 2087 OFF}  //  Supresses warnings on following $WARN
+  {$WARN 2087 OFF}  //  Suppresses warnings on following $WARN
   {$WARN 7121 OFF}  //  Warning: Check size of memory operand "op: memory-operand-size is X bits, but expected [Y bits]"
 {$ENDIF}
 
-procedure Fce_HalfToSingle_Asm(Input, Output: Pointer); register; assembler;
+procedure Fce_HalfToSingle_Asm(Input,Output: Pointer); register; assembler;
 asm
-    MOV     AX,   word ptr [Input]
-    AND     EAX,  $FFFF
+    MOVZX   EAX,  word ptr [Input]
     MOVD    XMM0, EAX
 
     DB  $C4, $E2, $79, $13, $C0         // VCVTPH2PS  XMM0, XMM0
@@ -546,10 +779,11 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf_Asm(Input, Output: Pointer); register; assembler;
+procedure Fce_SingleToHalf_Asm(Input,Output: Pointer); register; assembler;
 asm
     MOVSS   XMM0, dword ptr [Input]
 
+    // $04 - rounding set in MXCSR is used  
     DB  $C4, $E3, $79, $1D, $C0, $04    // VCVTPS2PH  XMM0, XMM0, $04
 
     MOVD    EAX,  XMM0
@@ -558,7 +792,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_HalfToSingle4x_Asm(Input, Output: Pointer); register; assembler;
+procedure Fce_HalfToSingle4x_Asm(Input,Output: Pointer); register; assembler;
 asm
     MOVSD   XMM0, qword ptr [Input]
 
@@ -569,10 +803,11 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingletoHalf4x_Asm(Input, Output: Pointer); register; assembler;
+procedure Fce_SingletoHalf4x_Asm(Input,Output: Pointer); register; assembler;
 asm
     MOVUPS  XMM0, dqword ptr [Input]
 
+    // $04 - rounding set in MXCSR is used 
     DB  $C4, $E3, $79, $1D, $C0, $04    // VCVTPS2PH  XMM0, XMM0, $04
 
     MOVSD   qword ptr [Output],   XMM0
@@ -588,11 +823,12 @@ end;
 //==============================================================================
 
 var
-  Var_HalfToSingle:   procedure(Input, Output: Pointer); register;
-  Var_SingleToHalf:   procedure(Input, Output: Pointer); register;
-  Var_HalfToSingle4x: procedure(Input, Output: Pointer); register;
-  Var_SingleToHalf4x: procedure(Input, Output: Pointer); register;
+  Var_HalfToSingle:   procedure(Input,Output: Pointer); register;
+  Var_SingleToHalf:   procedure(Input,Output: Pointer); register;
+  Var_HalfToSingle4x: procedure(Input,Output: Pointer); register;
+  Var_SingleToHalf4x: procedure(Input,Output: Pointer); register;
 
+//==============================================================================
 
 Function MapHalfToWord(Value: Half): UInt16;
 begin
@@ -622,26 +858,28 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure HalfToSingle4x(Input, Output: Pointer);
+procedure HalfToSingle4x(Input,Output: Pointer);
 begin
 Var_HalfToSingle4x(Input,Output);
 end;
 
 //------------------------------------------------------------------------------
 
-procedure SingleToHalf4x(Input, Output: Pointer);
+procedure SingleToHalf4x(Input,Output: Pointer);
 begin
 Var_SingleToHalf4x(Input,Output);
 end;
 
-//==  Number information functions  ============================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Number information functions
+-------------------------------------------------------------------------------}
 
 Function IsZero(const Value: Half): Boolean;
 var
   _Value: UInt16 absolute Value;
 begin
-Result := _Value and UInt16($7FFF) = 0;
+// bits other than sign are zero
+Result := _Value and F16_MASK_NSGN = 0;
 end;
 
 //------------------------------------------------------------------------------
@@ -650,7 +888,8 @@ Function IsNaN(const Value: Half): Boolean;
 var
   _Value: UInt16 absolute Value;
 begin
-Result := ((_Value and UInt16($7C00)) = $7C00) and ((_Value and UInt16($03FF)) <> 0);
+// max exponent and non-zero mantissa
+Result := ((_Value and F16_MASK_EXP) = F16_MASK_EXP) and ((_Value and F16_MASK_FRAC) <> 0);
 end;
 
 //------------------------------------------------------------------------------
@@ -659,19 +898,21 @@ Function IsInfinite(const Value: Half): Boolean;
 var
   _Value: UInt16 absolute Value;
 begin
-Result := ((_Value and UInt16($7C00)) = $7C00) and ((_Value and UInt16($03FF)) = 0);
+// max exponent and zero mantissa
+Result := ((_Value and F16_MASK_EXP) = F16_MASK_EXP) and ((_Value and F16_MASK_FRAC) = 0);
 end;
 
-//==  Sign-related functions  ==================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Sign-related functions
+-------------------------------------------------------------------------------}
 
 Function Sign(const Value: Half): TValueSign;
 var
   _Value: UInt16 absolute Value;
 begin
-If (_Value and UInt16($7FFF)) <> 0 then
+If (_Value and F16_MASK_NSGN) <> 0 then
   begin
-    If (_Value and UInt16($8000)) <> 0 then
+    If (_Value and F16_MASK_SIGN) <> 0 then
       Result := -1
     else
       Result := 1;
@@ -686,7 +927,7 @@ var
   _Value:   UInt16 absolute Value;
   _Result:  UInt16 absolute Result;
 begin
-_Result := _Value and UInt16($7FFF);
+_Result := _Value and F16_MASK_NSGN;
 end;
 
 //------------------------------------------------------------------------------
@@ -696,11 +937,12 @@ var
   _Value:   UInt16 absolute Value;
   _Result:  UInt16 absolute Result;
 begin
-_Result := _Value xor UInt16($8000);
+_Result := _Value xor F16_MASK_SIGN;
 end;
 
-//==  Comparison functions  ====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Comparison functions
+-------------------------------------------------------------------------------}
 
 Function IsEqual(const A,B: Half): Boolean;
 var
@@ -738,8 +980,9 @@ begin
 Result := HalfToSingle(A) >= HalfToSingle(B);
 end;
 
-//==  Arithmetic functions  ====================================================
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Arithmetic functions
+-------------------------------------------------------------------------------}
 
 Function Add(const A,B: Half): Half;
 begin
@@ -767,10 +1010,10 @@ begin
 Result := SingleToHalf(HalfToSingle(A) / HalfToSingle(B));
 end;
 
-//==  Operators overloading  ===================================================
-//------------------------------------------------------------------------------
-
 {$IFDEF FPC}
+{-------------------------------------------------------------------------------
+    Overloaded operators (FPC only)
+-------------------------------------------------------------------------------}
 
 operator := (Value: Half): Single;
 begin
@@ -884,8 +1127,71 @@ end;
 
 {$ENDIF}
 
-//==  Unit initialization  =====================================================
+{===============================================================================
+    Unit implementation routines
+===============================================================================}
+
+Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
+begin
+{$IFDEF PurePascal}
+Result := False;
+{$ELSE}
+case Func of
+  fnHalfToSingle:   Result := @Var_HalfToSingle = @Fce_HalfToSingle_Asm;
+  fnSingleToHalf:   Result := @Var_SingleToHalf = @Fce_SingleToHalf_Asm;
+  fnHalfToSingle4x: Result := @Var_HalfToSingle4x = @Fce_HalfToSingle4x_Asm;
+  fnSingleToHalf4x: Result := @Var_SingleToHalf4x = @Fce_SingleToHalf4x_Asm;
+else
+  raise EF16UnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
+end;
+{$ENDIF}
+end;
+
 //------------------------------------------------------------------------------
+
+procedure Float16FunctionPas(Func: TFloat16Functions);
+begin
+case Func of
+  fnHalfToSingle:   Var_HalfToSingle := Fce_HalfToSingle_Pas;
+  fnSingleToHalf:   Var_SingleToHalf := Fce_SingleToHalf_Pas;
+  fnHalfToSingle4x: Var_HalfToSingle4x := Fce_HalfToSingle4x_Pas;
+  fnSingleToHalf4x: Var_SingleToHalf4x := Fce_SingleToHalf4x_Pas;
+else
+  raise EF16UnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
+end;
+end;
+ 
+//------------------------------------------------------------------------------
+
+procedure Float16FunctionAsm(Func: TFloat16Functions);
+begin
+{$IFNDEF PurePascal}
+case Func of
+  fnHalfToSingle:   Var_HalfToSingle := Fce_HalfToSingle_Asm;
+  fnSingleToHalf:   Var_SingleToHalf := Fce_SingleToHalf_Asm;
+  fnHalfToSingle4x: Var_HalfToSingle4x := Fce_HalfToSingle4x_Asm;
+  fnSingleToHalf4x: Var_SingleToHalf4x := Fce_SingleToHalf4x_Asm;
+else
+  raise EF16UnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
+end;
+{$ENDIF}
+end;
+ 
+//------------------------------------------------------------------------------
+
+procedure Float16FunctionAssign(Func: TFloat16Functions; AssignASM: Boolean);
+begin
+{$IFNDEF PurePascal}
+If AssignASM then
+  Float16FunctionPas(Func)
+else
+{$ENDIF}
+  Float16FunctionAsm(Func);
+end;
+
+{-------------------------------------------------------------------------------
+    Unit initialization
+-------------------------------------------------------------------------------}
 
 procedure LoadDefaultFunctions;
 begin
