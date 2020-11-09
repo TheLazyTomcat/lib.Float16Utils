@@ -9,27 +9,48 @@
 
   Float16
 
-  Main purpose of this library is to provide routines for conversion from and to
-  half precision (16 bit) floating point number (Single -> Half, Half -> Single).
-  It also provides functions for basic arithmetic and comparison, as well as
-  overloaded operators when compiled using FPC.
-  F16C extension is used when symbol AllowF16CExtension is defined, PurePascal
-  is not defined, and when (and only when) it is supported by the CPU and OS.
+    Main purpose of this library is to provide routines for conversion from and
+    to half precision (16bit) floating point numbers (Single -> Half, Half ->
+    Single).
+    It also provides functions for basic arithmetic and comparison, as well as
+    overloaded operators when compiled using FPC. But note that these functions
+    only converts arguments given as halfs into single-precision (32bit) floats
+    and operates on them.
+    
+    F16C extension is used when symbol AllowF16CExtension is defined, PurePascal
+    is not defined, and when (and only when) it is supported by the CPU and OS.
 
-  Implemented Half should conform to IEEE 754-2008, meaning it has one sign bit
-  (value is negative when sign bit is set, positive otherwise), 5 bits of offset
-  exponent (exponent bias is 15) and 11 bit mantissa (10 bits explicitly stored,
-  highest bit is assumed to be one for non-zero exponent, zero otherwise).
+    Implemented Half should conform to IEEE 754-2008, meaning it has one sign
+    bit (value is negative when sign bit is set, positive otherwise), 5 bits of
+    biased exponent (exponent bias is 15) and 11 bit mantissa (10 bits
+    explicitly stored, highest bit is assumed to be zero for denormal numbers,
+    one otherwise)
 
-  NOTE - type Half is declared in unit AuxTypes, not here.
+      NOTE - type Half is declared in unit AuxTypes, not here.
 
-  ©František Milt 2017-10-21
+  Version 1.0.3 (2020-11-09)
 
-  Version 1.0.2
+  Last change 2020-11-09
+
+  ©2017-2020 František Milt
+
+  Contacts:
+    František Milt: frantisek.milt@gmail.com
+
+  Support:
+    If you find this code useful, please consider supporting its author(s) by
+    making a small donation using the following link(s):
+
+      https://www.paypal.me/FMilt
+
+  Changelog:
+    For detailed changelog and history please refer to this git repository:
+
+      github.com/TheLazyTomcat/Lib.Float16
 
   Dependencies:
-    AuxTypes    - github.com/ncs-sniper/Lib.AuxTypes
-  * SimpleCPUID - github.com/ncs-sniper/Lib.SimpleCPUID
+    AuxTypes    - github.com/TheLazyTomcat/Lib.AuxTypes
+  * SimpleCPUID - github.com/TheLazyTomcat/Lib.SimpleCPUID
 
   SimpleCPUID is required only when AllowF16CExtension symbol is defined and
   PurePascal symbol is not defined.
@@ -44,7 +65,6 @@ unit Float16;
   cannot make changes to this unit, define this symbol for the entire project
   and this unit will be compiled in PurePascal mode.
 }
-{$DEFINE Float16_PurePascal}{$message 'remove'}
 {$IFDEF Float16_PurePascal}
   {$DEFINE PurePascal}
 {$ENDIF}
@@ -196,11 +216,11 @@ procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defi
     Number information functions
 -------------------------------------------------------------------------------}
 
-Function IsZero(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsNaN(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsInfinite(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsNormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsDenormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsZero(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function IsNaN(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function IsInfinite(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function IsNormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}  // returns false on zero
+Function IsDenormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
 {-------------------------------------------------------------------------------
     Sign-related functions
@@ -210,8 +230,8 @@ type
   TValueSign = -1..1;
 
 Function Sign(const Value: Half): TValueSign;
-Function Abs(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-Function Neg(const Value: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Abs(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function Neg(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
 
 {-------------------------------------------------------------------------------
     Comparison functions
@@ -222,6 +242,15 @@ Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+
+type
+  TValueRelationship = -1..1; // to preven problems (because delphi vs. FPC)
+
+Function CompareValue(const A,B: Half; Epsilon: Half): TValueRelationship;{$IFDEF CanInline} inline; {$ENDIF} overload;
+Function CompareValue(const A,B: Half): TValueRelationship;{$IFDEF CanInline} inline; {$ENDIF} overload;
+
+Function SameValue(const A,B: Half; Epsilon: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF} overload;
+Function SameValue(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF} overload;
 
 {-------------------------------------------------------------------------------
     Arithmetic functions
@@ -282,6 +311,7 @@ Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
   Routes selected function to pascal implementation.
 }
 procedure Float16FunctionPas(Func: TFloat16Functions);
+
 {
   Routes selected function to assembly implementation.
   Does nothing when PurePascal symbol is defined.
@@ -303,14 +333,16 @@ procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
 
 implementation
 
-{$IF Defined(AllowF16CExtension) and not Defined(PurePascal)}
 uses
-  SimpleCPUID;
+{$IF Defined(AllowF16CExtension) and not Defined(PurePascal)}
+  SimpleCPUID,
 {$IFEND}
+  Math;
 
 {$IFDEF FPC_DisableWarns}
   {$DEFINE FPCDWM}
   {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
+  {$DEFINE W5024:={$WARN 5024 OFF}} // Parameter "$1" not used
 {$ENDIF}
 
 {-------------------------------------------------------------------------------
@@ -323,12 +355,16 @@ const
   F16_MASK_FRAC = UInt16($03FF);  // fraction/mantissa
   F16_MASK_NSGN = UInt16($7FFF);  // non-sign bits
   F16_MASK_FHB  = UInt16($0200);  // highest bit of the mantissa
+{$IFNDEF FPC} // I don't want to deal with nonsensical warnings about unused constants
   F16_MASK_INTB = UInt16($0400);  // otherwise implicit integer bit of the mantissa
+{$ENDIF}
 
   F32_MASK_SIGN = UInt32($80000000);
   F32_MASK_EXP  = UInt32($7F800000);
   F32_MASK_FRAC = UInt32($007FFFFF);
+{$IFNDEF FPC}
   F32_MASK_NSGN = UInt32($7FFFFFFF);
+{$ENDIF}
   F32_MASK_FHB  = UInt32($00400000);
   F32_MASK_INTB = UInt32($00800000);
 
@@ -520,7 +556,7 @@ procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
   {$INCLUDE '.\Float16.inc'}
 begin
 PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and F16_MASK_NSGN] or
-                {sign} UInt32(PUInt16(HalfPtr)^ and F16_MASK_SIGN) shl 16;
+                       UInt32(PUInt16(HalfPtr)^ and F16_MASK_SIGN) shl 16;
 end;
 {$ELSE}
 var
@@ -734,6 +770,7 @@ case Exponent of
           end
         // signed infinity
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
+        
 else
   // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
   Mantissa := ShiftMantissa(Mantissa,13);
@@ -1014,6 +1051,34 @@ begin
 Result := HalfToSingle(A) >= HalfToSingle(B);
 end;
 
+//------------------------------------------------------------------------------
+
+Function CompareValue(const A,B: Half; Epsilon: Half): TValueRelationship;
+begin
+Result := TValueRelationship(Math.CompareValue(HalfToSingle(A),HalfToSingle(B),HalfToSingle(Epsilon)));
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function CompareValue(const A,B: Half): TValueRelationship;
+begin
+Result := TValueRelationship(Math.CompareValue(HalfToSingle(A),HalfToSingle(B),0.0));
+end;
+
+//------------------------------------------------------------------------------
+
+Function SameValue(const A,B: Half; Epsilon: Half): Boolean;
+begin
+Result := Math.SameValue(HalfToSingle(A),HalfToSingle(B),HalfToSingle(Epsilon));
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function SameValue(const A,B: Half): Boolean;
+begin
+Result := Math.SameValue(HalfToSingle(A),HalfToSingle(B),0.0);
+end;
+
 {-------------------------------------------------------------------------------
     Arithmetic functions
 -------------------------------------------------------------------------------}
@@ -1165,6 +1230,7 @@ end;
     Unit implementation routines
 ===============================================================================}
 
+{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
 Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
 begin
 {$IFDEF PurePascal}
@@ -1180,6 +1246,7 @@ else
 end;
 {$ENDIF}
 end;
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -1197,6 +1264,7 @@ end;
  
 //------------------------------------------------------------------------------
 
+{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
 procedure Float16FunctionAsm(Func: TFloat16Functions);
 begin
 {$IFNDEF PurePascal}
@@ -1210,9 +1278,11 @@ else
 end;
 {$ENDIF}
 end;
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
  
 //------------------------------------------------------------------------------
 
+{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
 procedure Float16FunctionAssign(Func: TFloat16Functions; AssignASM: Boolean);
 begin
 {$IFNDEF PurePascal}
@@ -1222,6 +1292,7 @@ else
 {$ENDIF}
   Float16FunctionAsm(Func);
 end;
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 
 {-------------------------------------------------------------------------------
     Unit initialization
