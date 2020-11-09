@@ -199,9 +199,8 @@ procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defi
 Function IsZero(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsNaN(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 Function IsInfinite(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-{$message 'implement'}
-//Function IsNormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-//Function IsDenormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsNormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsDenormal(const Value: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
 
 {-------------------------------------------------------------------------------
     Sign-related functions
@@ -319,11 +318,19 @@ uses
 -------------------------------------------------------------------------------}
 
 const
-  F16_MASK_SIGN = UInt16($8000);
+  F16_MASK_SIGN = UInt16($8000);  // sign bit
   F16_MASK_EXP  = UInt16($7C00);  // exponent
   F16_MASK_FRAC = UInt16($03FF);  // fraction/mantissa
   F16_MASK_NSGN = UInt16($7FFF);  // non-sign bits
   F16_MASK_FHB  = UInt16($0200);  // highest bit of the mantissa
+  F16_MASK_INTB = UInt16($0400);  // otherwise implicit integer bit of the mantissa
+
+  F32_MASK_SIGN = UInt32($80000000);
+  F32_MASK_EXP  = UInt32($7F800000);
+  F32_MASK_FRAC = UInt32($007FFFFF);
+  F32_MASK_NSGN = UInt32($7FFFFFFF);
+  F32_MASK_FHB  = UInt32($00400000);
+  F32_MASK_INTB = UInt32($00800000);
 
 {-------------------------------------------------------------------------------
     Auxiliary functions
@@ -403,6 +410,7 @@ Function SetSSERoundingMode(NewValue: TSSERoundingMode): TSSERoundingMode;
 var
   Num:  UInt32;
 begin
+Result := GetSSERoundingMode;
 case NewValue of
   rmDown:     Num := 1;
   rmUp:       Num := 2;
@@ -540,6 +548,7 @@ Sign := PUInt16(HalfPtr)^ and F16_MASK_SIGN;
 Exponent := Int32((PUInt16(HalfPtr)^ and F16_MASK_EXP) shr 10);
 Mantissa := PUInt16(HalfPtr)^ and F16_MASK_FRAC;
 case Exponent of
+
         // zero exponent - zero or denormal
     0:  If Mantissa <> 0 then
           begin
@@ -553,12 +562,12 @@ case Exponent of
             MantissaShift := HighZeroCount(Mantissa) + 8;
             PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
                                    UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
-                                  (UInt32(UInt32(Mantissa) shl MantissaShift) and UInt32($007FFFFF));
+                                  (UInt32(UInt32(Mantissa) shl MantissaShift) and F32_MASK_FRAC);
           end
         // zero, return signed zero
         else PUInt32(SinglePtr)^ := UInt32(Sign shl 16);
 
-        // max esponent - infinity or NaN
+        // max exponent - infinity or NaN
   $1F:  If Mantissa <> 0 then
           begin
             // not a number
@@ -567,18 +576,19 @@ case Exponent of
                 // signaled NaN
                 If GetSSEFlag(flMInvalidOp) then
                   // quiet signed NaN with mantissa
-                  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7FC00000) or
+                  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or (F32_MASK_EXP or F32_MASK_FHB) or
                                          UInt32(UInt32(Mantissa) shl 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with mantissa
-            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000) or
+            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
                                         UInt32(UInt32(Mantissa) shl 13);
           end
         // infinity - return signed infinity
-        else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or UInt32($7F800000);
+        else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP;
+        
 else
   // normal number
   PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
@@ -591,147 +601,149 @@ end;
 //------------------------------------------------------------------------------
 
 procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
-//var
-//  Sign:       UInt32;
-//  Exponent:   Int32;
-//  Mantissa:   UInt32;
-//  MXCSR:      UInt32;
-//  RoundMode:  Integer;
-(*
+var
+  Sign:       UInt32;
+  Exponent:   Int32;  // biased exponent (true exponent + 127)
+  Mantissa:   UInt32;
+
   Function ShiftMantissa(Value: UInt32; Shift: Byte): UInt32;
   var
-    ShiftedOut: UInt32;
-    Distance:   UInt32;
+    Mask:     UInt32;
+    Low,High: UInt32;
   begin
-    If (Shift > 0) and (Shift <= 32) then
+    If (Shift > 0) and (Shift < 25) then
       begin
-        If Shift = 32 then Result := 0
-          else Result := Value shr Shift;
-        ShiftedOut := Value and (UInt32($FFFFFFFF) shr (32 - Shift));
-        case RoundMode of
-              // nearest
-          0:  If ShiftedOut <> 0 then
+        Mask := UInt32($FFFFFFFF) shr (32 - Shift);
+        If (Value and Mask) <> 0 then
+          begin
+            Low := Value and not Mask;
+            High := Low + (Mask + 1);
+            case GetSSERoundingMode of
+              rmDown,
+              rmUp,
+              rmTruncate: raise Exception.Create('not implemented yet');
+            else
+             {rmNearest}
+              If (Value - Low) > (High - Value) then
+                Result := High shr Shift
+              else If (Value - Low) < (High - Value) then
+                Result := Low shr Shift
+              else
                 begin
-                  If Shift >= 32 then Distance := UInt32(-Int32(ShiftedOut))
-                    else Distance := UInt32((UInt32(1) shl Shift) - ShiftedOut);
-                  If (Distance < ShiftedOut) or ((Distance = ShiftedOut) and ((Result and 1) <> 0)) then
-                    Inc(Result);
+                  // select the one with clear lowest bit
+                  If High and (Mask + 1) = 0 then
+                    Result := High shr Shift
+                  else
+                    Result := Low shr Shift;
                 end;
-              // down
-          1:  If (Sign <> 0) and (ShiftedOut <> 0) then
-                Inc(Result);
-              // up
-          2:  If (Sign = 0) and (ShiftedOut <> 0) then
-                Inc(Result);
-        else
-          {truncate}  // nothing to do
-        end;
+            end;
+          end
+        else Result := Value shr Shift;
       end
-    else Result := Value;
+    // following cases should not happen, but whatever...  
+    else If Shift >= 25 then
+      Result := 0
+    else
+      Result := Value;
   end;
-*)
+
 begin
-(*
-{$WARN SYMBOL_PLATFORM OFF}
-MXCSR := GetMXCSR;
-{$WARN SYMBOL_PLATFORM ON}
-RoundMode := Integer((MXCSR shr 13) and 3);
-Sign := PUInt32(SinglePtr)^ and UInt32($80000000);
-Exponent := Int32(PUInt32(SinglePtr)^ shr 23) and $FF;
-Mantissa := PUInt32(SinglePtr)^ and UInt32($007FFFFF);
+Sign := PUInt32(SinglePtr)^ and F32_MASK_SIGN;
+Exponent := (PUInt32(SinglePtr)^ and F32_MASK_EXP) shr 23;
+Mantissa := PUInt32(SinglePtr)^ and F32_MASK_FRAC;
 case Exponent of
-        // zero or subnormal
+
+        // exponent of zero - zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // subnormal
-            If (MXCSR and MXCSR_EUnderflow) <> 0 then
-              begin
-                If ((RoundMode = 1{down}) and (Sign <> 0)) or
-                   ((RoundMode = 2{up}) and (Sign = 0)) then
-                  // convert to smallest representable number
-                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
-                else
-                  // convert to signed zero
-                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
-              end
-            // signal underflow
-            else raise EUnderflow.Create('Floating point underflow');
+            // denormal
+            If GetSSEFlag(flMUnderflow) then
+              // convert to signed zero
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16)
+            else
+              // signal underflow
+              raise EUnderflow.Create('Floating point underflow');
           end
         // return signed zero
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
 
-        // exponent is too small to be represented in half even as subnormal
+        // exponent 1..101 (-126..-26 unbiased) - too small to be represented in half even as denormal
    1..
-  $65:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
+  $65:  If GetSSEFlag(flMUnderflow) then
           begin
+            (* do not delete yet
             If ((RoundMode = 1{down}) and (Sign <> 0)) or
                ((RoundMode = 2{up}) and (Sign = 0)) then
               // convert to smallest representable number
               PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
             else
+            *)
               // convert to signed zero
               PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
           end
         // signal underflow
         else raise EUnderflow.Create('Floating point underflow');
 
-        // result is subnormal value (resulting exponent in half is 0)
+        // exponent 102..112 (-25..-15 unbiased) - exponent still too small to be represented in half,
+        // but the result can be denormalized (implicit exponent of -14, explicit 0)
   $66..
-  $71:  If (MXCSR and MXCSR_EUnderflow) <> 0 then
-         PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
-           ShiftMantissa(Mantissa or UInt32($00800000),$7E - Exponent)
+  $70:  If GetSSEFlag(flMUnderflow) then
+          // denormalizing
+          PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent))
         else
           // signal underflow
           raise EUnderflow.Create('Floating point underflow');
 
-        // exponent is too large to be represented in half (resulting exponent
-        // would be larger than $1E)
+        // exponent 143..254 (+16..+127 unbiased) - too large to be represented
+        // in half (resulting exponent would be larger than 15)
   $8F..
-  $FE:  If (MXCSR and MXCSR_EOverflow) <> 0 then
+  $FE:  If GetSSEFlag(flMOverflow) then
           begin
+            (*
             If (RoundMode = 3{trunc}) or
                ((RoundMode = 1{down}) and (Sign = 0)) or
                ((RoundMode = 2{up}) and (Sign <> 0)) then
               // convert to largest representable number
               PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
             else
+            *)
               // convert to signed infinity
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00);
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
           end
         // signal overflow
         else raise EOverflow.Create('Floating point overflow');
 
-        // special cases (INF, NaN, ...)
+        // max exponent - infinity or NaN
   $FF:  If Mantissa <> 0 then
           begin
-            If (Mantissa and UInt32($00400000)) = 0 then
+            // not a number (NaN)
+            If (Mantissa and F32_MASK_FHB) = 0 then
               begin
                 // signalled NaN
-                If (MXCSR and MXCSR_EInvalidOP) <> 0 then
+                If GetSSEFlag(flMInvalidOP) then
                   // quiet signed NaN with truncated mantissa
-                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7E00) or
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or F16_MASK_FHB or
                                        UInt16(Mantissa shr 13)
                 else
                   // signaling NaN
                   raise EInvalidOp.Create('Invalid floating point operation');
               end
             // quiet signed NaN with truncated mantisssa
-            else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00) or
+            else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or
                                       UInt16(Mantissa shr 13);
           end
         // signed infinity
-        else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7C00);
+        else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
 else
-  // representable numbers, normalized value
-  Exponent := Exponent - 112;
-  // mantissa shift correction
+  // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
   Mantissa := ShiftMantissa(Mantissa,13);
-  If (Mantissa and UInt32($00000400)) <> 0 then
+  // check if mantisa overflowed, if so, increase exponent to compensate (mantissa will be zero)
+  If Mantissa > F16_MASK_FRAC then
     Inc(Exponent);
-  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16((Exponent and $1F) shl 10) or
-                       UInt16(Mantissa and $000003FF);
+  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
+                       UInt16((Exponent - 112) shl 10) or
+                       UInt16(Mantissa and F16_MASK_FRAC);
 end;
-*)
 end;
 
 //==============================================================================
@@ -900,6 +912,28 @@ var
 begin
 // max exponent and zero mantissa
 Result := ((_Value and F16_MASK_EXP) = F16_MASK_EXP) and ((_Value and F16_MASK_FRAC) = 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsNormal(const Value: Half): Boolean;
+var
+  _Value:   UInt16 absolute Value;
+  Exponent: UInt16;
+begin
+// non-zero less than max exponent, non-zero mantissa
+Exponent := (_Value and F16_MASK_EXP) shr 10;
+Result := (Exponent > 0) and (Exponent < $1F) and ((_Value and F16_MASK_FRAC) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsDenormal(const Value: Half): Boolean;
+var
+  _Value: UInt16 absolute Value;
+begin
+// zero exponent, non-zero mantissa
+Result := ((_Value and F16_MASK_EXP) = 0) and ((_Value and F16_MASK_FRAC) <> 0);
 end;
 
 {-------------------------------------------------------------------------------
