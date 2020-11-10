@@ -519,32 +519,63 @@ end;
 
 Function GetSSEFlags: TSSEFlags;
 var
-  i:  TSSEFlag;
+  MXCSR:  UInt32;
+  i:      TSSEFlag;
 begin
 Result := [];
+MXCSR := GetMXCSR;
 For i := Low(TSSEFlag) to High(TSSEFlag) do
-  If GetSSEFlag(i) then
-    Include(Result,i);
+  case i of
+    flEInvalidOp:       If (MXCSR and MXCSR_EXC_InvalidOP) <> 0 then Include(Result,i);
+    flEDenormal:        If (MXCSR and MXCSR_EXC_Denormal) <> 0 then Include(Result,i);
+    flEDivByZero:       If (MXCSR and MXCSR_EXC_DivByZero) <> 0 then Include(Result,i);
+    flEOverflow:        If (MXCSR and MXCSR_EXC_Overflow) <> 0 then Include(Result,i);
+    flEUnderflow:       If (MXCSR and MXCSR_EXC_Underflow) <> 0 then Include(Result,i);
+    flEPrecision:       If (MXCSR and MXCSR_EXC_Precision) <> 0 then Include(Result,i);
+    flMInvalidOp:       If (MXCSR and MXCSR_EMASK_InvalidOP) <> 0 then Include(Result,i);
+    flMDenormal:        If (MXCSR and MXCSR_EMASK_Denormal) <> 0 then Include(Result,i);
+    flMDivByZero:       If (MXCSR and MXCSR_EMASK_DivByZero) <> 0 then Include(Result,i);
+    flMOverflow:        If (MXCSR and MXCSR_EMASK_Overflow) <> 0 then Include(Result,i);
+    flMUnderflow:       If (MXCSR and MXCSR_EMASK_Underflow) <> 0 then Include(Result,i);
+    flMPrecision:       If (MXCSR and MXCSR_EMASK_Precision) <> 0 then Include(Result,i);
+    flDenormalsAreZero: If (MXCSR and MXCSR_DenormalsAreZero) <> 0 then Include(Result,i);
+    flFlushToZero:      If (MXCSR and MXCSR_FlushToZero) <> 0 then Include(Result,i);
+  else
+    raise EF16InvalidFlag.CreateFmt('GetX87Flags: Invalid flag (%d).',[Ord(i)]);
+  end;
 end;
 
 //------------------------------------------------------------------------------
 
 procedure SetSSEFlags(NewValue: TSSEFlags);
+var
+  MXCSR:  UInt32;
+
+  procedure SetFlag(FlagMask: UInt32; NewState: Boolean);
+  begin
+    If NewState then
+      MXCSR := MXCSR or FlagMask
+    else
+      MXCSR := MXCSR and not FlagMask;
+  end;
+
 begin
-SetSSEFlag(flEInvalidOp,flEInvalidOp in NewValue);
-SetSSEFlag(flEDenormal,flEDenormal in NewValue);
-SetSSEFlag(flEDivByZero,flEDivByZero in NewValue);
-SetSSEFlag(flEOverflow,flEOverflow in NewValue);
-SetSSEFlag(flEUnderflow,flEUnderflow in NewValue);
-SetSSEFlag(flEPrecision,flEPrecision in NewValue);
-SetSSEFlag(flMInvalidOp,flMInvalidOp in NewValue);
-SetSSEFlag(flMDenormal,flMDenormal in NewValue);
-SetSSEFlag(flMDivByZero,flMDivByZero in NewValue);
-SetSSEFlag(flMOverflow,flMOverflow in NewValue);
-SetSSEFlag(flMUnderflow,flMUnderflow in NewValue);
-SetSSEFlag(flMPrecision,flMPrecision in NewValue);
-SetSSEFlag(flDenormalsAreZero,flDenormalsAreZero in NewValue);
-SetSSEFlag(flFlushToZero,flFlushToZero in NewValue);
+MXCSR := GetMXCSR;
+SetFlag(MXCSR_EXC_InvalidOp,flEInvalidOp in NewValue);
+SetFlag(MXCSR_EXC_Denormal,flEDenormal in NewValue);
+SetFlag(MXCSR_EXC_DivByZero,flEDivByZero in NewValue);
+SetFlag(MXCSR_EXC_Overflow,flEOverflow in NewValue);
+SetFlag(MXCSR_EXC_Underflow,flEUnderflow in NewValue);
+SetFlag(MXCSR_EXC_Precision,flEPrecision in NewValue);
+SetFlag(MXCSR_EMASK_InvalidOp,flMInvalidOp in NewValue);
+SetFlag(MXCSR_EMASK_Denormal,flMDenormal in NewValue);
+SetFlag(MXCSR_EMASK_DivByZero,flMDivByZero in NewValue);
+SetFlag(MXCSR_EMASK_Overflow,flMOverflow in NewValue);
+SetFlag(MXCSR_EMASK_Underflow,flMUnderflow in NewValue);
+SetFlag(MXCSR_EMASK_Precision,flMPrecision in NewValue);
+SetFlag(MXCSR_DenormalsAreZero,flDenormalsAreZero in NewValue);
+SetFlag(MXCSR_FlushToZero,flFlushToZero in NewValue);
+SetMXCSR(MXCSR);
 end;
 
 {-------------------------------------------------------------------------------
