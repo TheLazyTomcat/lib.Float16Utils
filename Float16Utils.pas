@@ -145,6 +145,8 @@ const
   NaN:      Half = ($00,$7E); // quiet NaN
   MaxHalf:  Half = ($FF,$7B); // 65504
   MinHalf:  Half = ($01,$00); // 5.96046e-8
+  PosOne:   Half = ($00,$3C); // +1.0
+  NegOne:   Half = ($00,$BC); // -1.0  
 
 {===============================================================================
     Library-specific exceptions - declaration
@@ -497,19 +499,26 @@ procedure HalfToSingle4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defi
 procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
-    Number information functions
+================================================================================
+                               Number information
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Number information - declaration
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Number information - number class
 -------------------------------------------------------------------------------}
 
 Function IsZero(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function IsDenormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 Function IsNaN(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 Function IsInfinite(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 Function IsNormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}  // returns false on zero
-Function IsDenormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
-    Sign-related functions
+    Number information - sign-related
 -------------------------------------------------------------------------------}
-
 type
   TValueSign = -1..1;
 
@@ -518,7 +527,15 @@ Function Abs(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} 
 Function Neg(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
-    Comparison functions
+================================================================================
+                              Comparison functions
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Comparison functions - declaration
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Comparison functions - basic comparison
 -------------------------------------------------------------------------------}
 
 Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
@@ -527,6 +544,9 @@ Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 
+{-------------------------------------------------------------------------------
+    Comparison functions - ordered comparison
+-------------------------------------------------------------------------------}
 type
   TValueRelationship = -1..1; // to preven problems (because delphi vs. FPC)
 
@@ -537,7 +557,15 @@ Function SameValue(const A,B: Half; Epsilon: Half): Boolean;{$IFDEF CanInline} i
 Function SameValue(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF} overload;
 
 {-------------------------------------------------------------------------------
-    Arithmetic functions
+================================================================================
+                              Arithmetic functions
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Arithmetic functions - declaration
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Arithmetic functions - basic arithmetic
 -------------------------------------------------------------------------------}
 
 Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
@@ -547,8 +575,16 @@ Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
-    Overloaded operators (FPC only)
+================================================================================
+                              Operators overloading
+================================================================================
 -------------------------------------------------------------------------------}
+{===============================================================================
+    Operators overloading - declaration
+===============================================================================}
+{
+  Operators overloading is currently implemented only for FPC.
+}
 
 // assignment operators
 operator := (Value: Half): Single;{$IFDEF CanInline} inline;{$ENDIF}
@@ -1668,8 +1704,17 @@ begin
 Var_SingleToHalf4x(Input,Output);
 end;
 
+
 {-------------------------------------------------------------------------------
-    Number information functions
+================================================================================
+                               Number information
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Number information - implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Number information - number class
 -------------------------------------------------------------------------------}
 
 Function IsZero(const Value: Half): Boolean;
@@ -1678,6 +1723,16 @@ var
 begin
 // bits other than sign are zero
 Result := _Value and F16_MASK_NSGN = 0;
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsDenormal(const Value: Half): Boolean;
+var
+  _Value: UInt16 absolute Value;
+begin
+// zero exponent, non-zero mantissa
+Result := ((_Value and F16_MASK_EXP) = 0) and ((_Value and F16_MASK_FRAC) <> 0);
 end;
 
 //------------------------------------------------------------------------------
@@ -1707,23 +1762,13 @@ var
   _Value:   UInt16 absolute Value;
   Exponent: UInt16;
 begin
-// non-zero less than max exponent, non-zero mantissa
+// non-zero less than max exponent, any mantissa
 Exponent := (_Value and F16_MASK_EXP) shr 10;
-Result := (Exponent > 0) and (Exponent < $1F) and ((_Value and F16_MASK_FRAC) <> 0);
-end;
-
-//------------------------------------------------------------------------------
-
-Function IsDenormal(const Value: Half): Boolean;
-var
-  _Value: UInt16 absolute Value;
-begin
-// zero exponent, non-zero mantissa
-Result := ((_Value and F16_MASK_EXP) = 0) and ((_Value and F16_MASK_FRAC) <> 0);
+Result := (Exponent > 0) and (Exponent < $1F);
 end;
 
 {-------------------------------------------------------------------------------
-    Sign-related functions
+    Number information - sign-related
 -------------------------------------------------------------------------------}
 
 Function Sign(const Value: Half): TValueSign;
@@ -1760,8 +1805,17 @@ begin
 _Result := _Value xor F16_MASK_SIGN;
 end;
 
+
 {-------------------------------------------------------------------------------
-    Comparison functions
+================================================================================
+                              Comparison functions
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Comparison functions - implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Comparison functions - basic comparison
 -------------------------------------------------------------------------------}
 
 Function IsEqual(const A,B: Half): Boolean;
@@ -1800,7 +1854,9 @@ begin
 Result := HalfToSingle(A) >= HalfToSingle(B);
 end;
 
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Comparison functions - ordered comparison
+-------------------------------------------------------------------------------}
 
 Function CompareValue(const A,B: Half; Epsilon: Half): TValueRelationship;
 begin
@@ -1829,7 +1885,15 @@ Result := Math.SameValue(HalfToSingle(A),HalfToSingle(B),0.0);
 end;
 
 {-------------------------------------------------------------------------------
-    Arithmetic functions
+================================================================================
+                              Arithmetic functions
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Arithmetic functions - implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Arithmetic functions - basic arithmetic
 -------------------------------------------------------------------------------}
 
 Function Add(const A,B: Half): Half;
@@ -1860,8 +1924,13 @@ end;
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
-    Overloaded operators (FPC only)
+================================================================================
+                              Operators overloading
+================================================================================
 -------------------------------------------------------------------------------}
+{===============================================================================
+    Operators overloading - implementation
+===============================================================================}
 
 operator := (Value: Half): Single;
 begin
