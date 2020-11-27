@@ -56,7 +56,7 @@
   PurePascal symbol is not defined.
 
 ===============================================================================}
-unit Float16;
+unit Float16Utils;
 {
   Float16Utils_PurePascal
 
