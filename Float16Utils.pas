@@ -154,6 +154,7 @@ type
 
   EF16UInvalidFlag     = class(EF16UException);
   EF16UUnknownFunction = class(EF16UException);
+  EF16UIntegrityError  = class(EF16UException);
 
 {-------------------------------------------------------------------------------
     Library-specific exceptions - floating-point exceptions
@@ -214,12 +215,12 @@ type
 // some constants for MXCSR
 const
   // MXCSR masks
-  MXCSR_EXC_InvalidOP = UInt32($00000001);
-  MXCSR_EXC_Denormal  = UInt32($00000002);
-  MXCSR_EXC_DivByZero = UInt32($00000004);
-  MXCSR_EXC_Overflow  = UInt32($00000008);
-  MXCSR_EXC_Underflow = UInt32($00000010);
-  MXCSR_EXC_Precision = UInt32($00000020);
+  MXCSR_EFLAG_InvalidOP = UInt32($00000001);
+  MXCSR_EFLAG_Denormal  = UInt32($00000002);
+  MXCSR_EFLAG_DivByZero = UInt32($00000004);
+  MXCSR_EFLAG_Overflow  = UInt32($00000008);
+  MXCSR_EFLAG_Underflow = UInt32($00000010);
+  MXCSR_EFLAG_Precision = UInt32($00000020);
 
   MXCSR_EMASK_InvalidOP = UInt32($00000080);
   MXCSR_EMASK_Denormal  = UInt32($00000100);
@@ -235,21 +236,69 @@ const
 
   MXCSR_SHIFT_Rounding = 13;
 
-//------------------------------------------------------------------------------
-// low-level access
+{--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+    Low-level access
+ --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --}
+{
+  GetMXCSR
 
+  Returns current value of MXCSR register.
+}
 Function GetMXCSR: UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  SetMXCSR
+
+  Sets MXCSR register to a passed value.
+}
 procedure SetMXCSR(NewValue: UInt32);{$IFDEF CanInline} inline;{$ENDIF}
 
+{
+  EmulatedMXCSR
+
+  Returns true when a real MXCSR register is used, false when operating on an
+  emulated local implementation.
+}
 Function EmulatedMXCSR: Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 
+{
+  Sets MXCSR register to $00001900 - denormal, underflow and precision
+  exceptions are masked (others are unmasked), rounding is set to nearest,
+  DAZ and FTZ bits are cleared.
+
+  Call this routine only when MXCSR is NOT emulated (ie. a real CPU register is
+  used) and the program is compiled so that SSE is not used as a primary mean
+  of floating point arithmetics and/or is not automatically initialized (if the
+  MXCSR equals to $00001F80 - a default value - you can safely assume it was
+  not properly initialized).
+
+  WARNING - the initialization must be done in each execution thread.
+}
 procedure InitMXCSR;{$IFDEF CanInline} inline;{$ENDIF}
 
+{
+  GetMXCSRMask
+
+  Returns a bitmask used when reading and writing the MXCSR register. Zeroes
+  are marking reserved bits, ones are marking used bits.
+
+  This value is only informative, the masking is done automatically in calls to
+  functions GetMXCSR and SetMXCSR.
+}
 Function GetMXCSRMask: UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  GetMXCSRSupportsDAZ
+
+  Returns true when DAZ bit, and therefore denormals-are-zeros mode, is
+  supported by the used implementation of MXCSR (be it true SSE register or
+  an emulation). False when not supported.
+}
 Function GetMXCSRSupportsDAZ: Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 
-//------------------------------------------------------------------------------
-// abstracted access
+{--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+    Abstracted access
+ --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --}
 
 type
   TSSERoundingMode = (rmNearest,rmDown,rmUp,rmTruncate);
@@ -263,53 +312,199 @@ type
 
   TSSEFlags = set of TSSEFlag;
 
+//------------------------------------------------------------------------------
+{
+  GetSSERoundingMode
+
+  Returns current value of rounding mode from MXCSR.
+}
 Function GetSSERoundingMode: TSSERoundingMode;
+
+{
+  SetSSERoundingMode
+
+  Sets rounding mode to a selected NewValue and returns previous value of
+  rounding mode.
+}
 Function SetSSERoundingMode(NewValue: TSSERoundingMode): TSSERoundingMode;
 
+//------------------------------------------------------------------------------
+{
+  GetSSEExceptionMask
+
+  Returns current value of selected exception mask bit.
+}
 Function GetSSEExceptionMask(SSEException: TSSEException): Boolean;
+
+{
+  SetSSEExceptionMask
+
+  Sets value of selected exception mask bit in MXCSR to a NewValue and returns
+  previous value of this bit.
+
+  When the bit is set (true), the slected exception will be masked and not
+  raised on its occurence.
+  When clear (false), the exception is unmasked and can be raised.
+}
 Function SetSSEExceptionMask(SSEException: TSSEException; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetSSEExceptionMasks
+
+  Returns status of all exception mask bits in MXCSR. When the bit is set, the
+  exception is included in the result, when it is clear, the exception is
+  excluded from the result.
+}
 Function GetSSEExceptionMasks: TSSEExceptions;
+
+{
+  SetSSEExceptionMasks
+
+  Sets new value of all exception mask bits in MXCSR. If an exception is
+  included in the NewValue, the mask bit will be set, when it is not included,
+  the mask bit will be cleared.
+
+  Returns previous state of all exception mask bits.
+}
 Function SetSSEExceptionMasks(NewValue: TSSEExceptions): TSSEExceptions;
 
-Function GetSSEExceptionState(SSEException: TSSEException): Boolean;
-Function SetSSEExceptionState(SSEException: TSSEException; NewValue: Boolean): Boolean;
+//------------------------------------------------------------------------------
+{
+  GetSSEExceptionFlag
 
-Function GetSSEExceptionStates: TSSEExceptions;
-Function SetSSEExceptionStates(NewValue: TSSEExceptions): TSSEExceptions;
+  Returns current value of selected exception flag bit.
+}
+Function GetSSEExceptionFlag(SSEException: TSSEException): Boolean;
 
+{
+  SetSSEExceptionFlag
+
+  Sets value of selected exception flag bit in MXCSR to a NewValue and returns
+  previous value of this bit.
+}
+Function SetSSEExceptionFlag(SSEException: TSSEException; NewValue: Boolean): Boolean;
+
+//------------------------------------------------------------------------------
+{
+  GetSSEExceptionFlags
+
+  Returns status of all exception flag bits in MXCSR. When the bit is set,
+  the exception is included in the result, when it is clear, the exception is
+  excluded from the result.
+}
+Function GetSSEExceptionFlags: TSSEExceptions;
+
+{
+  SetSSEExceptionFlags
+
+  Sets new value of all exception flag bits in MXCSR. If an exception is
+  included in the NewValue, the flag bit will be set, when it is not included,
+  the flag bit will be cleared.
+
+  Returns previous state of all exception flag bits.
+}
+Function SetSSEExceptionFlags(NewValue: TSSEExceptions): TSSEExceptions;
+
+//------------------------------------------------------------------------------
+{
+  GetSSEFlag
+
+  Returns current value of selected flag bit.
+}
 Function GetSSEFlag(Flag: TSSEFlag): Boolean;
+
+{
+  SetSSEFlag
+
+  Sets value of selected flag bit in MXCSR to a NewValue and returns previous
+  value of this bit.
+}
 Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetSSEFlags
+
+  Returns status of all flag bits in MXCSR. When the bit is set, the flag is
+  included in the result, when it is clear, the flag is excluded from the
+  result.
+}
 Function GetSSEFlags: TSSEFlags;
+
+{
+  SetSSEFlags
+
+  Sets new value of all flag bits in MXCSR. If a flag is included in the
+  NewValue, the bit will be set, when it is not included, the bit will be
+  cleared.
+
+  Returns previous state of all flag bits.
+}
 procedure SetSSEFlags(NewValue: TSSEFlags);
+
+//------------------------------------------------------------------------------
+{
+  ClearSSEExceptions
+
+  Clears (sets to 0) lower 6 bits of MXCSR - that is, all exception flag bits.
+}
+procedure ClearSSEExceptions;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  RaiseSSEExceptions(MXCSR)
+
+  Raises first encountered exception according to flags set in the passed MXCSR.
+
+  The exception flag bits are traversed one by one and, when a set bit is
+  encountered, it is cleared and a corresponding exception is raised.
+  Only one exception is raised in each call, even when multiple bits are set.
+  The order in which the bits are traversed and therefore the order of
+  exception raising is:
+
+    InvalidOP
+    Denormal
+    DivByZero
+    Underflow
+    Overflow
+    Precision
+}
+procedure RaiseSSEExceptions(var MXCSR: UInt32); overload;
+
+{
+  RaiseSSEExceptions
+
+  Operates exactly the same as the first overload, but directly on the current
+  MXCSR (be it real register or emulation).
+}
+procedure RaiseSSEExceptions; overload;
 
 {-------------------------------------------------------------------------------
     Auxiliary routines - conversion functions
 -------------------------------------------------------------------------------}
 
-Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline; {$ENDIF}
-Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 // for gebugging purposes... later remove
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
 
-Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
-procedure HalfToSingle4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+procedure HalfToSingle4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
     Number information functions
 -------------------------------------------------------------------------------}
 
-Function IsZero(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-Function IsNaN(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-Function IsInfinite(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-Function IsNormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}  // returns false on zero
-Function IsDenormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function IsZero(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function IsNaN(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function IsInfinite(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function IsNormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}  // returns false on zero
+Function IsDenormal(const Value: Half): Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
     Sign-related functions
@@ -319,36 +514,36 @@ type
   TValueSign = -1..1;
 
 Function Sign(const Value: Half): TValueSign;
-Function Abs(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
-Function Neg(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline; {$IFEND}
+Function Abs(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+Function Neg(const Value: Half): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
     Comparison functions
 -------------------------------------------------------------------------------}
 
-Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+Function IsEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function IsLess(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function IsGreater(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function IsLessOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function IsGreaterOrEqual(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 
 type
   TValueRelationship = -1..1; // to preven problems (because delphi vs. FPC)
 
-Function CompareValue(const A,B: Half; Epsilon: Half): TValueRelationship;{$IFDEF CanInline} inline; {$ENDIF} overload;
-Function CompareValue(const A,B: Half): TValueRelationship;{$IFDEF CanInline} inline; {$ENDIF} overload;
+Function CompareValue(const A,B: Half; Epsilon: Half): TValueRelationship;{$IFDEF CanInline} inline;{$ENDIF} overload;
+Function CompareValue(const A,B: Half): TValueRelationship;{$IFDEF CanInline} inline;{$ENDIF} overload;
 
-Function SameValue(const A,B: Half; Epsilon: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF} overload;
-Function SameValue(const A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF} overload;
+Function SameValue(const A,B: Half; Epsilon: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF} overload;
+Function SameValue(const A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF} overload;
 
 {-------------------------------------------------------------------------------
     Arithmetic functions
 -------------------------------------------------------------------------------}
 
-Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
@@ -356,30 +551,30 @@ Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 -------------------------------------------------------------------------------}
 
 // assignment operators
-operator := (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
-operator := (Value: Single): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator := (Value: Half): Single;{$IFDEF CanInline} inline;{$ENDIF}
+operator := (Value: Single): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 // explicit assignment operators
-operator explicit (Value: Half): Single;{$IFDEF CanInline} inline; {$ENDIF}
-operator explicit (Value: Single): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator explicit (Value: Half): Single;{$IFDEF CanInline} inline;{$ENDIF}
+operator explicit (Value: Single): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 // comparison operators
-operator = (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-operator > (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-operator < (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-operator >= (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-operator <= (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
-operator <> (A,B: Half): Boolean;{$IFDEF CanInline} inline; {$ENDIF}
+operator = (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+operator > (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+operator < (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+operator >= (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+operator <= (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+operator <> (A,B: Half): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
 
 // unary operators
-operator + (A: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-operator - (A: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator + (A: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+operator - (A: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 // arithmetic operators
-operator + (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-operator - (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-operator * (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
-operator / (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
+operator + (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+operator - (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+operator * (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+operator / (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 {$ENDIF}
 
@@ -393,7 +588,7 @@ operator / (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
             is absolutely no thread-safety protection
 
   For full description of this section, please refer to the same section in
-  BitOps library (file BitOps.pas).
+  BitOps library (github.com/TheLazyTomcat/Lib.BitOps), file BitOps.pas.
 }
 
 type
@@ -651,6 +846,8 @@ If not MXCSRInit then
   {
     rounding set to nearest, masked precission, underflow and denormal
     exceptions, DAZ and FTZ flags are clear, exception states are all clear
+
+    note - hardware initialization value is $00001F80
   }
     Pas_MXCSR := $00001900;
     MXCSRInit := True;
@@ -672,7 +869,9 @@ var
   Var_GetMXCSR: Function: UInt32; register;
   Var_SetMXCSR: procedure(NewValue: UInt32); register;
 
-//------------------------------------------------------------------------------
+{--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+    Low-level access
+ --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --}
 
 Function GetMXCSR: UInt32;
 begin
@@ -692,9 +891,13 @@ Function EmulatedMXCSR: Boolean;
 begin
 {$IFDEF F16U_ASM_IMPL}
 If Assigned(@Var_SetMXCSR) then
-  Result := @Var_SetMXCSR = @Fce_SetMXCSR_Pas
-else
-  raise EF16UUnknownFunction.Create('EmulatedMXCSR: Unassigned routing.');
+  begin
+    If UIM_Float16Utils_GetFuncImpl(fnGetMXCSR) = UIM_Float16Utils_GetFuncImpl(fnSetMXCSR) then
+      Result := UIM_Float16Utils_GetFuncImpl(fnGetMXCSR) = imPascal
+    else
+      raise EF16UIntegrityError.Create('EmulatedMXCSR: Functions GetMXCSR and SetMXCSR are routed differently.');
+  end
+else raise EF16UUnknownFunction.Create('EmulatedMXCSR: Unassigned routing.');
 {$ELSE}
 Result := True;
 {$ENDIF}
@@ -721,7 +924,9 @@ begin
 Result := (MXCSR_MASK and MXCSR_DenormalsAreZero) <> 0;
 end;
 
-//==============================================================================
+{--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+    Abstracted access
+ --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --}
 
 Function GetSSERoundingMode: TSSERoundingMode;
 begin
@@ -772,7 +977,7 @@ end;
 
 Function SetSSEExceptionMask(SSEException: TSSEException; NewValue: Boolean): Boolean;
 
-  procedure SetFlag(Bitmask: UInt32);
+  procedure SetBit(Bitmask: UInt32);
   begin
     If NewValue then
       SetMXCSR(GetMXCSR or Bitmask)
@@ -783,12 +988,12 @@ Function SetSSEExceptionMask(SSEException: TSSEException; NewValue: Boolean): Bo
 begin
 Result := GetSSEExceptionMask(SSEException);
 case SSEException of
-  excInvalidOp: SetFlag(MXCSR_EMASK_InvalidOP);
-  excDenormal:  SetFlag(MXCSR_EMASK_Denormal);
-  excDivByZero: SetFlag(MXCSR_EMASK_DivByZero);
-  excOverflow:  SetFlag(MXCSR_EMASK_Overflow);
-  excUnderflow: SetFlag(MXCSR_EMASK_Underflow);
-  excPrecision: SetFlag(MXCSR_EMASK_Precision);
+  excInvalidOp: SetBit(MXCSR_EMASK_InvalidOP);
+  excDenormal:  SetBit(MXCSR_EMASK_Denormal);
+  excDivByZero: SetBit(MXCSR_EMASK_DivByZero);
+  excOverflow:  SetBit(MXCSR_EMASK_Overflow);
+  excUnderflow: SetBit(MXCSR_EMASK_Underflow);
+  excPrecision: SetBit(MXCSR_EMASK_Precision);
 else
   raise EF16UInvalidFlag.CreateFmt('SetSSEExceptionMask: Invalid SSE exception (%d).',[Ord(SSEException)]);
 end;
@@ -822,7 +1027,7 @@ Function SetSSEExceptionMasks(NewValue: TSSEExceptions): TSSEExceptions;
 var
   MXCSR:  UInt32;
 
-  procedure SetFlag(Bitmask: UInt32; NewState: Boolean);
+  procedure SetBit(Bitmask: UInt32; NewState: Boolean);
   begin
     If NewState then
       MXCSR := MXCSR or Bitmask
@@ -833,36 +1038,36 @@ var
 begin
 Result := GetSSEExceptionMasks;
 MXCSR := GetMXCSR;
-SetFlag(MXCSR_EMASK_InvalidOP,excInvalidOp in NewValue);
-SetFlag(MXCSR_EMASK_Denormal,excDenormal in NewValue);
-SetFlag(MXCSR_EMASK_DivByZero,excDivByZero in NewValue);
-SetFlag(MXCSR_EMASK_Overflow,excOverflow in NewValue);
-SetFlag(MXCSR_EMASK_Underflow,excUnderflow in NewValue);
-SetFlag(MXCSR_EMASK_Precision,excPrecision in NewValue);
+SetBit(MXCSR_EMASK_InvalidOP,excInvalidOp in NewValue);
+SetBit(MXCSR_EMASK_Denormal,excDenormal in NewValue);
+SetBit(MXCSR_EMASK_DivByZero,excDivByZero in NewValue);
+SetBit(MXCSR_EMASK_Overflow,excOverflow in NewValue);
+SetBit(MXCSR_EMASK_Underflow,excUnderflow in NewValue);
+SetBit(MXCSR_EMASK_Precision,excPrecision in NewValue);
 SetMXCSR(MXCSR);
 end;
 
 //------------------------------------------------------------------------------
 
-Function GetSSEExceptionState(SSEException: TSSEException): Boolean;
+Function GetSSEExceptionFlag(SSEException: TSSEException): Boolean;
 begin
 case SSEException of
-  excInvalidOp: Result := (GetMXCSR and MXCSR_EXC_InvalidOP) <> 0;
-  excDenormal:  Result := (GetMXCSR and MXCSR_EXC_Denormal) <> 0;
-  excDivByZero: Result := (GetMXCSR and MXCSR_EXC_DivByZero) <> 0;
-  excOverflow:  Result := (GetMXCSR and MXCSR_EXC_Overflow) <> 0;
-  excUnderflow: Result := (GetMXCSR and MXCSR_EXC_Underflow) <> 0;
-  excPrecision: Result := (GetMXCSR and MXCSR_EXC_Precision) <> 0;
+  excInvalidOp: Result := (GetMXCSR and MXCSR_EFLAG_InvalidOP) <> 0;
+  excDenormal:  Result := (GetMXCSR and MXCSR_EFLAG_Denormal) <> 0;
+  excDivByZero: Result := (GetMXCSR and MXCSR_EFLAG_DivByZero) <> 0;
+  excOverflow:  Result := (GetMXCSR and MXCSR_EFLAG_Overflow) <> 0;
+  excUnderflow: Result := (GetMXCSR and MXCSR_EFLAG_Underflow) <> 0;
+  excPrecision: Result := (GetMXCSR and MXCSR_EFLAG_Precision) <> 0;
 else
-  raise EF16UInvalidFlag.CreateFmt('GetSSEExceptionState: Invalid SSE exception (%d).',[Ord(SSEException)]);
+  raise EF16UInvalidFlag.CreateFmt('GetSSEExceptionFlag: Invalid SSE exception (%d).',[Ord(SSEException)]);
 end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function SetSSEExceptionState(SSEException: TSSEException; NewValue: Boolean): Boolean;
+Function SetSSEExceptionFlag(SSEException: TSSEException; NewValue: Boolean): Boolean;
 
-  procedure SetFlag(Bitmask: UInt32);
+  procedure SetBit(Bitmask: UInt32);
   begin
     If NewValue then
       SetMXCSR(GetMXCSR or Bitmask)
@@ -871,22 +1076,22 @@ Function SetSSEExceptionState(SSEException: TSSEException; NewValue: Boolean): B
   end;
 
 begin
-Result := GetSSEExceptionMask(SSEException);
+Result := GetSSEExceptionFlag(SSEException);
 case SSEException of
-  excInvalidOp: SetFlag(MXCSR_EXC_InvalidOP);
-  excDenormal:  SetFlag(MXCSR_EXC_Denormal);
-  excDivByZero: SetFlag(MXCSR_EXC_DivByZero);
-  excOverflow:  SetFlag(MXCSR_EXC_Overflow);
-  excUnderflow: SetFlag(MXCSR_EXC_Underflow);
-  excPrecision: SetFlag(MXCSR_EXC_Precision);
+  excInvalidOp: SetBit(MXCSR_EFLAG_InvalidOP);
+  excDenormal:  SetBit(MXCSR_EFLAG_Denormal);
+  excDivByZero: SetBit(MXCSR_EFLAG_DivByZero);
+  excOverflow:  SetBit(MXCSR_EFLAG_Overflow);
+  excUnderflow: SetBit(MXCSR_EFLAG_Underflow);
+  excPrecision: SetBit(MXCSR_EFLAG_Precision);
 else
-  raise EF16UInvalidFlag.CreateFmt('SetSSEExceptionState: Invalid SSE exception (%d).',[Ord(SSEException)]);
+  raise EF16UInvalidFlag.CreateFmt('SetSSEExceptionFlag: Invalid SSE exception (%d).',[Ord(SSEException)]);
 end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function GetSSEExceptionStates: TSSEExceptions;
+Function GetSSEExceptionFlags: TSSEExceptions;
 var
   MXCSR:  UInt32;
   i:      TSSEException;
@@ -895,24 +1100,24 @@ Result := [];
 MXCSR := GetMXCSR;
 For i := Low(TSSEException) to High(TSSEException) do
   case i of
-    excInvalidOp: If (MXCSR and MXCSR_EXC_InvalidOP) <> 0 then Include(Result,i);
-    excDenormal:  If (MXCSR and MXCSR_EXC_Denormal) <> 0 then Include(Result,i);
-    excDivByZero: If (MXCSR and MXCSR_EXC_DivByZero) <> 0 then Include(Result,i);
-    excOverflow:  If (MXCSR and MXCSR_EXC_Overflow) <> 0 then Include(Result,i);
-    excUnderflow: If (MXCSR and MXCSR_EXC_Underflow) <> 0 then Include(Result,i);
-    excPrecision: If (MXCSR and MXCSR_EXC_Precision) <> 0 then Include(Result,i);
+    excInvalidOp: If (MXCSR and MXCSR_EFLAG_InvalidOP) <> 0 then Include(Result,i);
+    excDenormal:  If (MXCSR and MXCSR_EFLAG_Denormal) <> 0 then Include(Result,i);
+    excDivByZero: If (MXCSR and MXCSR_EFLAG_DivByZero) <> 0 then Include(Result,i);
+    excOverflow:  If (MXCSR and MXCSR_EFLAG_Overflow) <> 0 then Include(Result,i);
+    excUnderflow: If (MXCSR and MXCSR_EFLAG_Underflow) <> 0 then Include(Result,i);
+    excPrecision: If (MXCSR and MXCSR_EFLAG_Precision) <> 0 then Include(Result,i);
   else
-    raise EF16UInvalidFlag.CreateFmt('GetSSEExceptionStates: Invalid SSE exception (%d).',[Ord(i)]);
+    raise EF16UInvalidFlag.CreateFmt('GetSSEExceptionFlags: Invalid SSE exception (%d).',[Ord(i)]);
   end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function SetSSEExceptionStates(NewValue: TSSEExceptions): TSSEExceptions;
+Function SetSSEExceptionFlags(NewValue: TSSEExceptions): TSSEExceptions;
 var
   MXCSR:  UInt32;
 
-  procedure SetFlag(Bitmask: UInt32; NewState: Boolean);
+  procedure SetBit(Bitmask: UInt32; NewState: Boolean);
   begin
     If NewState then
       MXCSR := MXCSR or Bitmask
@@ -921,14 +1126,14 @@ var
   end;
 
 begin
-Result := GetSSEExceptionMasks;
+Result := GetSSEExceptionFlags;
 MXCSR := GetMXCSR;
-SetFlag(MXCSR_EXC_InvalidOP,excInvalidOp in NewValue);
-SetFlag(MXCSR_EXC_Denormal,excDenormal in NewValue);
-SetFlag(MXCSR_EXC_DivByZero,excDivByZero in NewValue);
-SetFlag(MXCSR_EXC_Overflow,excOverflow in NewValue);
-SetFlag(MXCSR_EXC_Underflow,excUnderflow in NewValue);
-SetFlag(MXCSR_EXC_Precision,excPrecision in NewValue);
+SetBit(MXCSR_EFLAG_InvalidOP,excInvalidOp in NewValue);
+SetBit(MXCSR_EFLAG_Denormal,excDenormal in NewValue);
+SetBit(MXCSR_EFLAG_DivByZero,excDivByZero in NewValue);
+SetBit(MXCSR_EFLAG_Overflow,excOverflow in NewValue);
+SetBit(MXCSR_EFLAG_Underflow,excUnderflow in NewValue);
+SetBit(MXCSR_EFLAG_Precision,excPrecision in NewValue);
 SetMXCSR(MXCSR);
 end;
 
@@ -948,7 +1153,7 @@ end;
 
 Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
 
-  procedure SetFlag(Bitmask: UInt32);
+  procedure SetBit(Bitmask: UInt32);
   begin
     If NewValue then
       SetMXCSR(GetMXCSR or Bitmask)
@@ -959,8 +1164,8 @@ Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
 begin
 Result := GetSSEFlag(Flag);
 case Flag of
-  flDenormalsAreZero: SetFlag(MXCSR_DenormalsAreZero);
-  flFlushToZero:      SetFlag(MXCSR_FlushToZero);
+  flDenormalsAreZero: SetBit(MXCSR_DenormalsAreZero);
+  flFlushToZero:      SetBit(MXCSR_FlushToZero);
 else
   raise EF16UInvalidFlag.CreateFmt('SetSSEFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
@@ -990,7 +1195,7 @@ procedure SetSSEFlags(NewValue: TSSEFlags);
 var
   MXCSR:  UInt32;
 
-  procedure SetFlag(Bitmask: UInt32; NewState: Boolean);
+  procedure SetBit(Bitmask: UInt32; NewState: Boolean);
   begin
     If NewState then
       MXCSR := MXCSR or Bitmask
@@ -1000,9 +1205,91 @@ var
 
 begin
 MXCSR := GetMXCSR;
-SetFlag(MXCSR_DenormalsAreZero,flDenormalsAreZero in NewValue);
-SetFlag(MXCSR_FlushToZero,flFlushToZero in NewValue);
+SetBit(MXCSR_DenormalsAreZero,flDenormalsAreZero in NewValue);
+SetBit(MXCSR_FlushToZero,flFlushToZero in NewValue);
 SetMXCSR(MXCSR);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure ClearSSEExceptions;
+begin
+SetMXCSR(GetMXCSR and $FFFFFFC0);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure RaiseSSEExceptions(var MXCSR: UInt32);
+begin
+If (MXCSR and MXCSR_EFLAG_InvalidOP) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_InvalidOP;
+    raise EF16UInvalidOp.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Denormal) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_Denormal;
+    raise EF16UDenormal.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_DivByZero) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_DivByZero;
+    raise EF16UDivByZero.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Overflow) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_Overflow;
+    raise EF16UOverflow.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Underflow) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_Underflow;
+    raise EF16UUnderflow.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Precision) <> 0 then
+  begin
+    MXCSR := MXCSR and not MXCSR_EFLAG_Precision;
+    raise EF16UPrecision.CreateDefMsg;
+  end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure RaiseSSEExceptions;
+var
+  MXCSR:  UInt32;
+begin
+MXCSR := GetMXCSR;
+If (MXCSR and MXCSR_EFLAG_InvalidOP) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_InvalidOP);
+    raise EF16UInvalidOp.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Denormal) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_Denormal);
+    raise EF16UDenormal.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_DivByZero) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_DivByZero);
+    raise EF16UDivByZero.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Overflow) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_Overflow);
+    raise EF16UOverflow.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Underflow) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_Underflow);
+    raise EF16UUnderflow.CreateDefMsg;
+  end;
+If (MXCSR and MXCSR_EFLAG_Precision) <> 0 then
+  begin
+    SetMXCSR(MXCSR and not MXCSR_EFLAG_Precision);
+    raise EF16UPrecision.CreateDefMsg;
+  end;
 end;
 
 {-------------------------------------------------------------------------------
@@ -1011,7 +1298,7 @@ end;
 
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 {$IFDEF H2S_Lookup}
-  {$INCLUDE '.\Float16.inc'}
+  {$INCLUDE '.\Float16Utils.inc'}
 begin
 PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and F16_MASK_NSGN] or
                        UInt32(PUInt16(HalfPtr)^ and F16_MASK_SIGN) shl 16;
