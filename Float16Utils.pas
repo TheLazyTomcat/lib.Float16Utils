@@ -158,7 +158,6 @@ type
 {-------------------------------------------------------------------------------
     Library-specific exceptions - floating-point exceptions
 -------------------------------------------------------------------------------}
-(*
 type
   EF16UFPUException = class(EF16UException)
   protected
@@ -166,10 +165,40 @@ type
   public
     constructor CreateDefMsg;
   end;
-*)
+
 {-------------------------------------------------------------------------------
     Library-specific exceptions - individual floating-point exception classes
 -------------------------------------------------------------------------------}
+type
+  EF16UInvalidOp = class(EF16UFPUException) // invalid operation/operand
+  protected
+    Function DefaultMessage: String; override;
+  end;
+
+  EF16UDenormal = class(EF16UFPUException)
+  protected
+    Function DefaultMessage: String; override;
+  end;
+
+  EF16UDivByZero = class(EF16UFPUException)
+  protected
+    Function DefaultMessage: String; override;
+  end;
+
+  EF16UOverflow = class(EF16UFPUException)
+  protected
+    Function DefaultMessage: String; override;
+  end;
+
+  EF16UUnderflow = class(EF16UFPUException)
+  protected
+    Function DefaultMessage: String; override;
+  end;
+
+  EF16UPrecision = class(EF16UFPUException)
+  protected
+    Function DefaultMessage: String; override;
+  end;
 
 {-------------------------------------------------------------------------------
 ================================================================================
@@ -262,7 +291,7 @@ procedure SetSSEFlags(NewValue: TSSEFlags);
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline; {$ENDIF}
 Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
-// for gebugging purposes...
+// for gebugging purposes... later remove
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
 
@@ -354,37 +383,65 @@ operator / (A,B: Half): Half;{$IFDEF CanInline} inline; {$ENDIF}
 
 {$ENDIF}
 
-{===============================================================================
-    Unit implementation routines
-===============================================================================}
+{-------------------------------------------------------------------------------
+================================================================================
+                         Unit implementation management
+================================================================================
+-------------------------------------------------------------------------------}
+{
+  WARNING - be wery careful when changing the selected implementation, as there
+            is absolutely no thread-safety protection
+
+  For full description of this section, please refer to the same section in
+  BitOps library (file BitOps.pas).
+}
 
 type
-  TFloat16Functions = (fnGetMXCSR,fnSetMXCSR,fnHalfToSingle,fnSingleToHalf,
-                       fnHalfToSingle4x,fnSingleToHalf4x);
+  TUIM_Float16Utils_Function = (fnGetMXCSR,fnSetMXCSR,
+                                fnHalfToSingle,fnSingleToHalf,
+                                fnHalfToSingle4x,fnSingleToHalf4x);
+
+  TUIM_Float16Utils_Implementation = (imNone,imPascal,imAssembly);
+
+  TUIM_Float16Utils_Implementations = set of TUIM_Float16Utils_Implementation;
+
+//------------------------------------------------------------------------------
 
 {
-  Returns true when selected function is currently set to asm-implemented code,
-  false otherwise.
+  Returns which implementations are available for the selected function.
 }
-Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
+Function UIM_Float16Utils_AvailableFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
 
 {
-  Routes selected function to pascal implementation.
+  Returns which implementations are supported and can be safely selected for
+  a given function.
 }
-procedure Float16FunctionPas(Func: TFloat16Functions);
+Function UIM_Float16Utils_SupportedFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
 
 {
-  Routes selected function to assembly implementation.
-  Does nothing when PurePascal symbol is defined or AllowF16CExtension symbol
-  is not defined.
+  Returns value indicating what implementation of the selected function is
+  executed when calling the function.
 }
-procedure Float16FunctionAsm(Func: TFloat16Functions);
+Function UIM_Float16Utils_GetFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementation;
 
 {
-  Calls Float16FunctionAsm for selected function when AssignASM is set to true,
-  otherwise it calls Float16FunctionPas.
+  Routes selected function to a selected implementation.
+
+  Returned value is the previous routing.
+
+  NOTE - when asm implementation cannot be used, and you still select it,
+         the function will be routed to pascal version
+
+  WARNING - when selecting imNone as an implementation for some function, the
+            routing is set to nil, and because the routing mechanism, for the
+            sake of speed, does not check validity, it will result in an
+            exception when calling this function
+
+  WANRING - when selecting unsupported implementation, calling the function will
+            almost certainly result in an system exception (invalid
+            instruction).
 }
-procedure Float16FunctionAssign(Func: TFloat16Functions; AssignASM: Boolean);
+Function UIM_Float16Utils_SetFuncImpl(Func: TUIM_Float16Utils_Function; NewImpl: TUIM_Float16Utils_Implementation): TUIM_Float16Utils_Implementation;
 
 implementation
 
@@ -422,6 +479,62 @@ const
 {$ENDIF}
   F32_MASK_FHB  = UInt32($00400000);
   F32_MASK_INTB = UInt32($00800000);
+
+{===============================================================================
+    Library-specific exceptions - implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Library-specific exceptions - floating-point exceptions
+-------------------------------------------------------------------------------}
+
+constructor EF16UFPUException.CreateDefMsg;
+begin
+Create(DefaultMessage);
+end;
+
+{-------------------------------------------------------------------------------
+    Library-specific exceptions - individual floating-point exception classes
+-------------------------------------------------------------------------------}
+
+Function EF16UInvalidOp.DefaultMessage: String;
+begin
+Result := 'Invalid floating point operand';
+end;
+
+//------------------------------------------------------------------------------
+
+Function EF16UDenormal.DefaultMessage: String;
+begin
+Result := 'Denormal floating point operand';
+end;
+
+//------------------------------------------------------------------------------
+
+Function EF16UDivByZero.DefaultMessage: String;
+begin
+Result := 'Floating point division by zero';
+end;
+
+//------------------------------------------------------------------------------
+
+Function EF16UOverflow.DefaultMessage: String;
+begin
+Result := 'Floating point arithmetic overflow';
+end;
+
+//------------------------------------------------------------------------------
+
+Function EF16UUnderflow.DefaultMessage: String;
+begin
+Result := 'Floating point arithmetic underflow';
+end;
+
+//------------------------------------------------------------------------------
+
+Function EF16UPrecision.DefaultMessage: String;
+begin
+Result := 'Inexact floating point result';
+end;
 
 {-------------------------------------------------------------------------------
 ================================================================================
@@ -507,7 +620,7 @@ threadvar
 
 {$IFDEF F16U_ASM_IMPL}
 
-Function GetMXCSR_Aam: UInt32; register; assembler;
+Function Fce_GetMXCSR_Asm: UInt32; register; assembler;
 var
   Temp: UInt32;
 asm
@@ -518,7 +631,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure SetMXCSR_Asm(NewValue: UInt32); register; assembler;
+procedure Fce_SetMXCSR_Asm(NewValue: UInt32); register; assembler;
 var
   Temp: UInt32;
 asm
@@ -531,7 +644,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function GetMXCSR_Pas: UInt32; register;
+Function Fce_GetMXCSR_Pas: UInt32; register;
 begin
 If not MXCSRInit then
   begin
@@ -547,7 +660,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure SetMXCSR_Pas(NewValue: UInt32); register;
+procedure Fce_SetMXCSR_Pas(NewValue: UInt32); register;
 begin
 Pas_MXCSR := NewValue and MXCSR_MASK;
 MXCSRInit := True;
@@ -579,7 +692,7 @@ Function EmulatedMXCSR: Boolean;
 begin
 {$IFDEF F16U_ASM_IMPL}
 If Assigned(@Var_SetMXCSR) then
-  Result := @Var_SetMXCSR = @SetMXCSR_Pas
+  Result := @Var_SetMXCSR = @Fce_SetMXCSR_Pas
 else
   raise EF16UUnknownFunction.Create('EmulatedMXCSR: Unassigned routing.');
 {$ELSE}
@@ -893,7 +1006,7 @@ SetMXCSR(MXCSR);
 end;
 
 {-------------------------------------------------------------------------------
-    Conversion functions
+    Auxiliary routines - conversion functions
 -------------------------------------------------------------------------------}
 
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
@@ -1575,109 +1688,151 @@ end;
 
 {$ENDIF}
 
-{===============================================================================
-    Unit implementation management
-===============================================================================}
-
-{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
-Function Float16FunctionIsAsm(Func: TFloat16Functions): Boolean;
-begin
-{$IFDEF PurePascal}
-Result := False;
-{$ELSE}
-case Func of
-  fnHalfToSingle:   Result := @Var_HalfToSingle = @Fce_HalfToSingle_Asm;
-  fnSingleToHalf:   Result := @Var_SingleToHalf = @Fce_SingleToHalf_Asm;
-  fnHalfToSingle4x: Result := @Var_HalfToSingle4x = @Fce_HalfToSingle4x_Asm;
-  fnSingleToHalf4x: Result := @Var_SingleToHalf4x = @Fce_SingleToHalf4x_Asm;
-else
-  raise EF16UUnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
-end;
-{$ENDIF}
-end;
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-
-//------------------------------------------------------------------------------
-
-procedure Float16FunctionPas(Func: TFloat16Functions);
-begin
-case Func of
-  fnHalfToSingle:   Var_HalfToSingle := Fce_HalfToSingle_Pas;
-  fnSingleToHalf:   Var_SingleToHalf := Fce_SingleToHalf_Pas;
-  fnHalfToSingle4x: Var_HalfToSingle4x := Fce_HalfToSingle4x_Pas;
-  fnSingleToHalf4x: Var_SingleToHalf4x := Fce_SingleToHalf4x_Pas;
-else
-  raise EF16UUnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
-end;
-end;
- 
-//------------------------------------------------------------------------------
-
-{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
-procedure Float16FunctionAsm(Func: TFloat16Functions);
-begin
-{$IFNDEF PurePascal}
-case Func of
-  fnHalfToSingle:   Var_HalfToSingle := Fce_HalfToSingle_Asm;
-  fnSingleToHalf:   Var_SingleToHalf := Fce_SingleToHalf_Asm;
-  fnHalfToSingle4x: Var_HalfToSingle4x := Fce_HalfToSingle4x_Asm;
-  fnSingleToHalf4x: Var_SingleToHalf4x := Fce_SingleToHalf4x_Asm;
-else
-  raise EF16UUnknownFunction.CreateFmt('Unknown function %d.',[Ord(Func)]);
-end;
-{$ENDIF}
-end;
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
- 
-//------------------------------------------------------------------------------
-
-{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
-procedure Float16FunctionAssign(Func: TFloat16Functions; AssignASM: Boolean);
-begin
-{$IFNDEF PurePascal}
-If AssignASM then
-  Float16FunctionPas(Func)
-else
-{$ENDIF}
-  Float16FunctionAsm(Func);
-end;
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-
 {-------------------------------------------------------------------------------
-    Unit initialization
+================================================================================
+                         Unit implementation management
+================================================================================
 -------------------------------------------------------------------------------}
+const
+  UIM_FLOAT16UTILS_PASCAL_IMPL: array[TUIM_Float16Utils_Function] of Pointer = (
+    @Fce_GetMXCSR_Pas,@Fce_SetMXCSR_Pas,
+    @Fce_HalfToSingle_Pas,@Fce_SingleToHalf_Pas,
+    @Fce_HalfToSingle4x_Pas,@Fce_SingleToHalf4x_Pas);
 
-procedure LoadDefaultFunctions;
+{$IFDEF F16U_ASM_IMPL}
+  UIM_FLOAT16UTILS_ASSEMBLY_IMPL: array[TUIM_Float16Utils_Function] of Pointer = (
+    @Fce_GetMXCSR_Asm,@Fce_SetMXCSR_Asm,
+    @Fce_HalfToSingle_Asm,@Fce_SingleToHalf_Asm,
+    @Fce_HalfToSingle4x_Asm,@Fce_SingleToHalf4x_Asm);
+{$ENDIF}
+
+//------------------------------------------------------------------------------
+
+Function UIM_GetFunctionVarAddr(Func: TUIM_Float16Utils_Function): PPointer;
 begin
-Var_HalfToSingle := Fce_HalfToSingle_Pas;
-Var_SingleToHalf := Fce_SingleToHalf_Pas;
-Var_HalfToSingle4x := Fce_HalfToSingle4x_Pas;
-Var_SingleToHalf4x := Fce_SingleToHalf4x_Pas;
+case Func of
+  fnGetMXCSR:       Result := Addr(@Var_GetMXCSR);
+  fnSetMXCSR:       Result := Addr(@Var_SetMXCSR);
+  fnHalfToSingle:   Result := Addr(@Var_HalfToSingle);
+  fnSingleToHalf:   Result := Addr(@Var_SingleToHalf);
+  fnHalfToSingle4x: Result := Addr(@Var_HalfToSingle4x);
+  fnSingleToHalf4x: Result := Addr(@Var_SingleToHalf4x);
+else
+  raise EF16UUnknownFunction.CreateFmt('UIM_GetFunctionVarAddr: Unknown function %d.',[Ord(Func)]);
+end;
 end;
 
 //------------------------------------------------------------------------------
 
-procedure Initialize;
+{$IFNDEF F16U_ASM_IMPL}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
+Function UIM_CheckASMSupport(Func: TUIM_Float16Utils_Function): Boolean;
 begin
-LoadDefaultFunctions;
+Result := False;
 {$IFDEF F16U_ASM_IMPL}
 with TSimpleCPUID.Create do
 try
-  If Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2 then
-    begin
-      Var_HalfToSingle := Fce_HalfToSingle_Asm;
-      Var_SingleToHalf := Fce_SingleToHalf_Asm;
-      Var_HalfToSingle4x := Fce_HalfToSingle4x_Asm;
-      Var_SingleToHalf4x := Fce_SingleToHalf4x_Asm;
-      MXCSR_MASK_Init(False);
-    end
-  else MXCSR_MASK_Init(True);
+  case Func of
+    fnGetMXCSR,fnSetMXCSR,
+    fnHalfToSingle,fnSingleToHalf,
+    fnHalfToSingle4x,fnSingleToHalf4x:
+      Result := Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2;
+  else
+    raise EF16UUnknownFunction.CreateFmt('UIM_CheckASMSupport: Unknown function (%d).',[Ord(Func)]);
+  end;
 finally
   Free;
 end;
-{$ELSE}
-MXCSR_MASK_Init(True);
 {$ENDIF}
+end;
+{$IFNDEF F16U_ASM_IMPL}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
+
+//==============================================================================
+
+Function UIM_Float16Utils_AvailableFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
+begin
+case Func of
+  fnGetMXCSR,fnSetMXCSR,
+  fnHalfToSingle,fnSingleToHalf,
+  fnHalfToSingle4x,fnSingleToHalf4x:
+    Result := [imNone,imPascal{$IFDEF F16U_ASM_IMPL},imAssembly{$ENDIF}];
+else
+  raise EF16UUnknownFunction.CreateFmt('UIM_Float16Utils_AvailableFuncImpl: Unknown function (%d).',[Ord(Func)]);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UIM_Float16Utils_SupportedFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
+begin
+case Func of
+  fnGetMXCSR,fnSetMXCSR,
+  fnHalfToSingle,fnSingleToHalf,
+  fnHalfToSingle4x,fnSingleToHalf4x:
+    If UIM_CheckASMSupport(Func) then
+      Result := [imNone,imPascal,imAssembly]
+    else
+      Result := [imNone,imPascal];
+else
+  raise EF16UUnknownFunction.CreateFmt('UIM_Float16Utils_SupportedFuncImpl: Unknown function (%d).',[Ord(Func)]);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UIM_Float16Utils_GetFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementation;
+var
+  FuncVarAddr:  PPointer;
+begin
+Result := imNone;
+FuncVarAddr := UIM_GetFunctionVarAddr(Func);
+// no need to check FuncVarAddr for validity
+If Assigned(FuncVarAddr^) then
+  begin
+    If FuncVarAddr^ = UIM_FLOAT16UTILS_PASCAL_IMPL[Func] then
+      Result := imPascal
+  {$IFDEF F16U_ASM_IMPL}
+    else If FuncVarAddr^ = UIM_FLOAT16UTILS_ASSEMBLY_IMPL[Func] then
+      Result := imAssembly
+  {$ENDIF};
+  end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UIM_Float16Utils_SetFuncImpl(Func: TUIM_Float16Utils_Function; NewImpl: TUIM_Float16Utils_Implementation): TUIM_Float16Utils_Implementation;
+var
+  FuncVarAddr:  PPointer;
+begin
+Result := UIM_Float16Utils_GetFuncImpl(Func);
+FuncVarAddr := UIM_GetFunctionVarAddr(Func);
+case NewImpl of
+  imPascal:   FuncVarAddr^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
+{$IFDEF F16U_ASM_IMPL}
+  imAssembly: FuncVarAddr^ := UIM_FLOAT16UTILS_ASSEMBLY_IMPL[Func];
+{$ELSE}
+  imAssembly: FuncVarAddr^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
+{$ENDIF}
+else
+ {imNone}
+  FuncVarAddr^ := nil;
+end;
+end;
+
+{-------------------------------------------------------------------------------
+================================================================================
+                               Unit initialization
+================================================================================
+-------------------------------------------------------------------------------}
+
+procedure Initialize;
+var
+  i:  TUIM_Float16Utils_Function;
+begin
+For i := Low(TUIM_Float16Utils_Function) to High(TUIM_Float16Utils_Function) do
+  If UIM_CheckASMSupport(i) then
+    UIM_Float16Utils_SetFuncImpl(i,imAssembly)
+  else
+    UIM_Float16Utils_SetFuncImpl(i,imPascal);
 end;
 
 //------------------------------------------------------------------------------
