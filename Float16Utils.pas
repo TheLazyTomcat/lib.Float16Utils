@@ -628,7 +628,7 @@ operator / (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 }
 
 type
-  TUIM_Float16Utils_Function = (fnGetMXCSR,fnSetMXCSR,
+  TUIM_Float16Utils_Function = (fnMXCSRAccess,
                                 fnHalfToSingle,fnSingleToHalf,
                                 fnHalfToSingle4x,fnSingleToHalf4x);
 
@@ -659,6 +659,10 @@ Function UIM_Float16Utils_GetFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Fl
   Routes selected function to a selected implementation.
 
   Returned value is the previous routing.
+
+  NOTE - when routing for fnMXCSRAccess, both GetMXCSR and SetMXCSR are set to
+         the same implementation - sanity precaution, so the two functions do
+         not operate on different domains
 
   NOTE - when asm implementation cannot be used, and you still select it,
          the function will be routed to pascal version
@@ -927,13 +931,9 @@ Function EmulatedMXCSR: Boolean;
 begin
 {$IFDEF F16U_ASM_IMPL}
 If Assigned(@Var_SetMXCSR) then
-  begin
-    If UIM_Float16Utils_GetFuncImpl(fnGetMXCSR) = UIM_Float16Utils_GetFuncImpl(fnSetMXCSR) then
-      Result := UIM_Float16Utils_GetFuncImpl(fnGetMXCSR) = imPascal
-    else
-      raise EF16UIntegrityError.Create('EmulatedMXCSR: Functions GetMXCSR and SetMXCSR are routed differently.');
-  end
-else raise EF16UUnknownFunction.Create('EmulatedMXCSR: Unassigned routing.');
+  Result := UIM_Float16Utils_GetFuncImpl(fnMXCSRAccess) = imPascal
+else
+  raise EF16UUnknownFunction.Create('EmulatedMXCSR: Unassigned routing.');
 {$ELSE}
 Result := True;
 {$ENDIF}
@@ -2051,13 +2051,13 @@ end;
 -------------------------------------------------------------------------------}
 const
   UIM_FLOAT16UTILS_PASCAL_IMPL: array[TUIM_Float16Utils_Function] of Pointer = (
-    @Fce_GetMXCSR_Pas,@Fce_SetMXCSR_Pas,
+    @Fce_SetMXCSR_Pas,
     @Fce_HalfToSingle_Pas,@Fce_SingleToHalf_Pas,
     @Fce_HalfToSingle4x_Pas,@Fce_SingleToHalf4x_Pas);
 
 {$IFDEF F16U_ASM_IMPL}
   UIM_FLOAT16UTILS_ASSEMBLY_IMPL: array[TUIM_Float16Utils_Function] of Pointer = (
-    @Fce_GetMXCSR_Asm,@Fce_SetMXCSR_Asm,
+    @Fce_SetMXCSR_Asm,
     @Fce_HalfToSingle_Asm,@Fce_SingleToHalf_Asm,
     @Fce_HalfToSingle4x_Asm,@Fce_SingleToHalf4x_Asm);
 {$ENDIF}
@@ -2067,8 +2067,7 @@ const
 Function UIM_GetFunctionVarAddr(Func: TUIM_Float16Utils_Function): PPointer;
 begin
 case Func of
-  fnGetMXCSR:       Result := Addr(@Var_GetMXCSR);
-  fnSetMXCSR:       Result := Addr(@Var_SetMXCSR);
+  fnMXCSRAccess:    Result := Addr(@Var_SetMXCSR);
   fnHalfToSingle:   Result := Addr(@Var_HalfToSingle);
   fnSingleToHalf:   Result := Addr(@Var_SingleToHalf);
   fnHalfToSingle4x: Result := Addr(@Var_HalfToSingle4x);
@@ -2088,7 +2087,7 @@ Result := False;
 with TSimpleCPUID.Create do
 try
   case Func of
-    fnGetMXCSR,fnSetMXCSR,
+    fnMXCSRAccess,
     fnHalfToSingle,fnSingleToHalf,
     fnHalfToSingle4x,fnSingleToHalf4x:
       Result := Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2;
@@ -2107,7 +2106,7 @@ end;
 Function UIM_Float16Utils_AvailableFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
 begin
 case Func of
-  fnGetMXCSR,fnSetMXCSR,
+  fnMXCSRAccess,
   fnHalfToSingle,fnSingleToHalf,
   fnHalfToSingle4x,fnSingleToHalf4x:
     Result := [imNone,imPascal{$IFDEF F16U_ASM_IMPL},imAssembly{$ENDIF}];
@@ -2121,7 +2120,7 @@ end;
 Function UIM_Float16Utils_SupportedFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Float16Utils_Implementations;
 begin
 case Func of
-  fnGetMXCSR,fnSetMXCSR,
+  fnMXCSRAccess,
   fnHalfToSingle,fnSingleToHalf,
   fnHalfToSingle4x,fnSingleToHalf4x:
     If UIM_CheckASMSupport(Func) then
@@ -2156,22 +2155,46 @@ end;
 //------------------------------------------------------------------------------
 
 Function UIM_Float16Utils_SetFuncImpl(Func: TUIM_Float16Utils_Function; NewImpl: TUIM_Float16Utils_Implementation): TUIM_Float16Utils_Implementation;
-var
-  FuncVarAddr:  PPointer;
 begin
 Result := UIM_Float16Utils_GetFuncImpl(Func);
-FuncVarAddr := UIM_GetFunctionVarAddr(Func);
-case NewImpl of
-  imPascal:   FuncVarAddr^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
-{$IFDEF F16U_ASM_IMPL}
-  imAssembly: FuncVarAddr^ := UIM_FLOAT16UTILS_ASSEMBLY_IMPL[Func];
-{$ELSE}
-  imAssembly: FuncVarAddr^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
-{$ENDIF}
+If Func = fnMXCSRAccess then
+  begin
+    case NewImpl of
+      imPascal:   begin
+                    Var_GetMXCSR := Fce_GetMXCSR_Pas;
+                    Var_SetMXCSR := Fce_SetMXCSR_Pas;
+                  end;
+    {$IFDEF F16U_ASM_IMPL}
+      imAssembly: begin
+                    Var_GetMXCSR := Fce_GetMXCSR_Asm;
+                    Var_SetMXCSR := Fce_SetMXCSR_Asm;
+                  end;
+    {$ELSE}
+      imAssembly: begin
+                    Var_GetMXCSR := Fce_GetMXCSR_Pas;
+                    Var_SetMXCSR := Fce_SetMXCSR_Pas;
+                  end;
+    {$ENDIF}
+    else
+     {imNone}
+      Var_GetMXCSR := nil;
+      Var_SetMXCSR := nil;
+    end;
+  end
 else
- {imNone}
-  FuncVarAddr^ := nil;
-end;
+  begin
+    case NewImpl of
+      imPascal:   UIM_GetFunctionVarAddr(Func)^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
+    {$IFDEF F16U_ASM_IMPL}
+      imAssembly: UIM_GetFunctionVarAddr(Func)^ := UIM_FLOAT16UTILS_ASSEMBLY_IMPL[Func];
+    {$ELSE}
+      imAssembly: UIM_GetFunctionVarAddr(Func)^ := UIM_FLOAT16UTILS_PASCAL_IMPL[Func];
+    {$ENDIF}
+    else
+     {imNone}
+      UIM_GetFunctionVarAddr(Func)^ := nil;
+    end;
+  end;
 end;
 
 {-------------------------------------------------------------------------------
