@@ -146,7 +146,10 @@ const
   MaxHalf:  Half = ($FF,$7B); // 65504
   MinHalf:  Half = ($01,$00); // 5.96046e-8
   PosOne:   Half = ($00,$3C); // +1.0
-  NegOne:   Half = ($00,$BC); // -1.0  
+  NegOne:   Half = ($00,$BC); // -1.0
+  Zero:     Half = ($00,$00); // (+)0
+
+  FLOAT16_EXPONENTBIAS = 15;
 
 {===============================================================================
     Library-specific exceptions - declaration
@@ -156,7 +159,6 @@ type
 
   EF16UInvalidFlag     = class(EF16UException);
   EF16UUnknownFunction = class(EF16UException);
-  EF16UIntegrityError  = class(EF16UException);
 
 {-------------------------------------------------------------------------------
     Library-specific exceptions - floating-point exceptions
@@ -231,8 +233,8 @@ const
   MXCSR_EMASK_Underflow = UInt32($00000800);
   MXCSR_EMASK_Precision = UInt32($00001000);
 
-  MXCSR_DenormalsAreZero = UInt32($00000040);
-  MXCSR_FlushToZero      = UInt32($00008000);
+  MXCSR_DenormalsAreZeros = UInt32($00000040);
+  MXCSR_FlushToZero       = UInt32($00008000);
 
   MXCSR_Rounding = UInt32($00006000); // bits 13..14
 
@@ -310,9 +312,13 @@ type
 
   TSSEExceptions = set of TSSEException;
 
-  TSSEFlag = (flDenormalsAreZero,flFlushToZero);
+  TSSEFlag = (flDenormalsAreZeros,flFlushToZero);
 
   TSSEFlags = set of TSSEFlag;
+
+const
+  AllSSEExceptions = [excInvalidOp,excDenormal,excDivByZero,excOverflow,
+                      excUnderflow,excPrecision];
 
 //------------------------------------------------------------------------------
 {
@@ -484,19 +490,36 @@ procedure RaiseSSEExceptions; overload;
 {-------------------------------------------------------------------------------
     Auxiliary routines - conversion functions
 -------------------------------------------------------------------------------}
+{
+  MapHalfToWord
 
+  Directly maps type half to a 16bit unsigned integer - no convesion is done.
+}
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+{
+  MapHalfToWord
+
+  Directly maps 16bit unsigned integer to type half - no convesion is done.
+}
 Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
-// for gebugging purposes... later remove
-procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
-procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
+//------------------------------------------------------------------------------
 
-Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
-Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure HalfToSingle(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
+procedure SingleToHalf(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 
-procedure HalfToSingle4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
-procedure SingleToHalf4x(Input,Output: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+//------------------------------------------------------------------------------
+
+Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
+Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
+
+//------------------------------------------------------------------------------
+{
+  Followng two functions are expecting pointers to packed vector or four
+  singles (SinglePtr) and packed vector or four halfs (HalfPtr).
+}
+procedure HalfToSingle4x(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure SingleToHalf4x(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
 ================================================================================
@@ -572,6 +595,45 @@ Function Add(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 Function Subtract(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 Function Multiply(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
+
+{-------------------------------------------------------------------------------
+================================================================================
+                            Type half decode/encode
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Type half decode/encode - declaration
+===============================================================================}
+{
+  DecodeFloat16
+  DecodeHalf
+
+  When BiasedExp is set to true, the returned exponent is exponent as it is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 11) inferred from the number class (0 for denormals and zero,
+  1 otherwise). When false, the integer bit is masked-out and is zero,
+  irrespective of actual value.
+}
+procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  EncodeFloat16
+  EncodeHalf
+
+  When BiasedExp is true, it indicates that the passed exponent is already
+  biased and will be stored as is. When false, the passed exponent will be
+  biased before storing.
+
+  Integer bit, when passed in the mantissa, is ignored - it is implied for
+  half-precision float.
+}
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;{$IFDEF CanInline} inline;{$ENDIF}
+
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
@@ -702,9 +764,7 @@ const
   F16_MASK_FRAC = UInt16($03FF);  // fraction/mantissa
   F16_MASK_NSGN = UInt16($7FFF);  // non-sign bits
   F16_MASK_FHB  = UInt16($0200);  // highest bit of the mantissa
-{$IFNDEF FPC} // I don't want to deal with nonsensical warnings about unused constants
   F16_MASK_INTB = UInt16($0400);  // otherwise implicit integer bit of the mantissa
-{$ENDIF}
 
   F32_MASK_SIGN = UInt32($80000000);
   F32_MASK_EXP  = UInt32($7F800000);
@@ -823,10 +883,12 @@ If not EmulatedImpl then
     // memory for FXSAVE must be 16-byte aligned and intialized to all-zero
     Buff := AllocMem(528{512 + 16 for alignement});
     try
+    {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
       If (PtrUInt(Buff) and PtrUInt($F)) = 0 then
         Mask := MXCSR_MASK_Load(Buff)
       else
         Mask := MXCSR_MASK_Load(Pointer((PtrUInt(Buff) + 16) and not PtrUInt($F)));
+    {$IFDEF FPCDWM}{$POP}{$ENDIF}
     finally
       FreeMem(Buff,528);
     end;
@@ -957,7 +1019,7 @@ end;
 
 Function GetMXCSRSupportsDAZ: Boolean;
 begin
-Result := (MXCSR_MASK and MXCSR_DenormalsAreZero) <> 0;
+Result := (MXCSR_MASK and MXCSR_DenormalsAreZeros) <> 0;
 end;
 
 {--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
@@ -1178,8 +1240,8 @@ end;
 Function GetSSEFlag(Flag: TSSEFlag): Boolean;
 begin
 case Flag of
-  flDenormalsAreZero: Result := (GetMXCSR and MXCSR_DenormalsAreZero) <> 0;
-  flFlushToZero:      Result := (GetMXCSR and MXCSR_FlushToZero) <> 0;
+  flDenormalsAreZeros:  Result := (GetMXCSR and MXCSR_DenormalsAreZeros) <> 0;
+  flFlushToZero:        Result := (GetMXCSR and MXCSR_FlushToZero) <> 0;
 else
   raise EF16UInvalidFlag.CreateFmt('GetSSEFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
@@ -1200,8 +1262,8 @@ Function SetSSEFlag(Flag: TSSEFlag; NewValue: Boolean): Boolean;
 begin
 Result := GetSSEFlag(Flag);
 case Flag of
-  flDenormalsAreZero: SetBit(MXCSR_DenormalsAreZero);
-  flFlushToZero:      SetBit(MXCSR_FlushToZero);
+  flDenormalsAreZeros:  SetBit(MXCSR_DenormalsAreZeros);
+  flFlushToZero:        SetBit(MXCSR_FlushToZero);
 else
   raise EF16UInvalidFlag.CreateFmt('SetSSEFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
@@ -1218,8 +1280,8 @@ Result := [];
 MXCSR := GetMXCSR;
 For i := Low(TSSEFlag) to High(TSSEFlag) do
   case i of
-    flDenormalsAreZero: If (MXCSR and MXCSR_DenormalsAreZero) <> 0 then Include(Result,i);
-    flFlushToZero:      If (MXCSR and MXCSR_FlushToZero) <> 0 then Include(Result,i);
+    flDenormalsAreZeros:  If (MXCSR and MXCSR_DenormalsAreZeros) <> 0 then Include(Result,i);
+    flFlushToZero:        If (MXCSR and MXCSR_FlushToZero) <> 0 then Include(Result,i);
   else
     raise EF16UInvalidFlag.CreateFmt('GetX87Flags: Invalid flag (%d).',[Ord(i)]);
   end;
@@ -1241,7 +1303,7 @@ var
 
 begin
 MXCSR := GetMXCSR;
-SetBit(MXCSR_DenormalsAreZero,flDenormalsAreZero in NewValue);
+SetBit(MXCSR_DenormalsAreZeros,flDenormalsAreZeros in NewValue);
 SetBit(MXCSR_FlushToZero,flFlushToZero in NewValue);
 SetMXCSR(MXCSR);
 end;
@@ -1346,14 +1408,14 @@ var
   Mantissa:       UInt16;
   MantissaShift:  Integer;
 
-  Function HighZeroCount(aValue: UInt16): Integer;
+  Function HighZeroCount(Value: UInt16): Integer;
   begin
-    If aValue <> 0 then
+    If Value <> 0 then
       begin
         Result := 0;
-        while (aValue and UInt16($8000)) = 0  do
+        while (Value and UInt16($8000)) = 0  do
           begin
-            aValue := UInt16(aValue shl 1);
+            Value := UInt16(Value shl 1);
             Inc(Result);
           end;
       end
@@ -1361,7 +1423,6 @@ var
   end;
 
 begin
-(*
 Sign := PUInt16(HalfPtr)^ and F16_MASK_SIGN;
 Exponent := Int32((PUInt16(HalfPtr)^ and F16_MASK_EXP) shr 10);
 Mantissa := PUInt16(HalfPtr)^ and F16_MASK_FRAC;
@@ -1370,20 +1431,33 @@ case Exponent of
         // zero exponent - zero or denormal
     0:  If Mantissa <> 0 then
           begin
-          {
-            denormal, normalize...
+            // denormal
+            If not GetSSEFlag(flDenormalsAreZeros) then
+              begin
+                // DAZ mode inactive
+                If GetSSEExceptionMask(excDenormal) then
+                  begin
+                    {$message 'P359 - half denormals not signaled?'}
+                    SetSSEExceptionFlag(excDenormal,True);
+                  {
+                    normalize...
 
-            ...shift mantissa left so that its highest set bit will be shifted
-            to implicit integer bit (bit 23), also correct exponent to reflect
-            this change
-          }
-            MantissaShift := HighZeroCount(Mantissa) + 8;
-            PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
-                                   UInt32(UInt32(Exponent - MantissaShift + 126) shl 23) or
-                                  (UInt32(UInt32(Mantissa) shl MantissaShift) and F32_MASK_FRAC);
+                    ...shift mantissa left so that its highest set bit will be
+                    shifted to implicit integer bit (bit 23), also correct
+                    exponent to reflect this change
+                  }
+                    MantissaShift := HighZeroCount(Mantissa) + 8;
+                    PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
+                                           UInt32(UInt32(126 - MantissaShift) shl 23) or
+                                          (UInt32(UInt32(Mantissa) shl MantissaShift) and F32_MASK_FRAC);
+                  end
+                else raise EF16UDenormal.CreateDefMsg;
+              end
+            // DAZ mode - return signed zero
+            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16);
           end
-        // zero, return signed zero
-        else PUInt32(SinglePtr)^ := UInt32(Sign shl 16);
+        // return signed zero
+        else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16);
 
         // max exponent - infinity or NaN
   $1F:  If Mantissa <> 0 then
@@ -1392,28 +1466,29 @@ case Exponent of
             If (Mantissa and F16_MASK_FHB) = 0 then
               begin
                 // signaled NaN
-                If GetSSEFlag(flMInvalidOp) then
-                  // quiet signed NaN with mantissa
-                  PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or (F32_MASK_EXP or F32_MASK_FHB) or
-                                         UInt32(UInt32(Mantissa) shl 13)
-                else
-                  // signaling NaN
-                  raise EInvalidOp.Create('Invalid floating point operation');
+                If GetSSEExceptionMask(excInvalidOp) then
+                  begin
+                    SetSSEExceptionFlag(excInvalidOp,True);
+                    // quiet signed NaN with mantissa
+                    PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
+                                           F32_MASK_FHB or UInt32(UInt32(Mantissa) shl 13)
+                  end
+                // signaling NaN
+                else raise EF16UInvalidOp.CreateDefMsg;
               end
             // quiet signed NaN with mantissa
             else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
                                         UInt32(UInt32(Mantissa) shl 13);
           end
-        // infinity - return signed infinity
+        // return signed infinity
         else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP;
         
 else
   // normal number
   PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
-                         UInt32(UInt32(Exponent + 112) shl 23) or
+                         UInt32(UInt32(Exponent + 112{127 - 15}) shl 23) or
                          UInt32(UInt32(Mantissa) shl 13);
 end;
-*)
 end;
 {$ENDIF}
 
@@ -1421,26 +1496,37 @@ end;
 
 procedure Fce_SingleToHalf_Pas(SinglePtr,HalfPtr: Pointer); register;
 var
-  Sign:       UInt32;
-  Exponent:   Int32;  // biased exponent (true exponent + 127)
-  Mantissa:   UInt32;
+  Sign:         UInt32;
+  Exponent:     Int32;  // biased exponent (true exponent + 127)
+  Mantissa:     UInt32;
+  RoundMode:    TSSERoundingMode;
+  BitsLost:     Boolean;
+  ManOverflow:  Boolean;
 
-  Function ShiftMantissa(Value: UInt32; Shift: Byte): UInt32;
+  Function ShiftMantissa(Value: UInt32; Shift: Byte; out DataLoss: Boolean): UInt32;
   var
     Mask:     UInt32;
     Low,High: UInt32;
   begin
+    DataLoss := False;
     If (Shift > 0) and (Shift < 25) then
       begin
         Mask := UInt32($FFFFFFFF) shr (32 - Shift);
         If (Value and Mask) <> 0 then
           begin
+            DataLoss := True;
             Low := Value and not Mask;
             High := Low + (Mask + 1);
             case GetSSERoundingMode of
-              rmDown,
-              rmUp,
-              rmTruncate: raise Exception.Create('not implemented yet');
+              rmDown:     If Sign <> 0 then
+                            Result := High shr Shift
+                          else
+                            Result := Low shr Shift;
+              rmUp:       If Sign <> 0 then
+                            Result := Low shr Shift
+                          else
+                            Result := High shr Shift;
+              rmTruncate: Result := Low shr Shift;
             else
              {rmNearest}
               If (Value - Low) > (High - Value) then
@@ -1466,8 +1552,24 @@ var
       Result := Value;
   end;
 
+  procedure ExceptionSetOrRaise(SSEException: TSSEException);
+  begin
+    If not GetSSEExceptionMask(SSEException) then
+      case SSEException of
+        excDenormal:  raise EF16UDenormal.CreateDefMsg;
+        excDivByZero: raise EF16UDivByZero.CreateDefMsg;
+        excOverflow:  raise EF16UOverflow.CreateDefMsg;
+        excUnderflow: raise EF16UUnderflow.CreateDefMsg;
+        excPrecision: raise EF16UPrecision.CreateDefMsg;
+      else
+       {excInvalidOp}
+        raise EF16UInvalidOP.CreateDefMsg;
+      end
+    else SetSSEExceptionFlag(SSEException,True);
+  end;
+
 begin
-(*
+RoundMode := GetSSERoundingMode;
 Sign := PUInt32(SinglePtr)^ and F32_MASK_SIGN;
 Exponent := (PUInt32(SinglePtr)^ and F32_MASK_EXP) shr 23;
 Mantissa := PUInt32(SinglePtr)^ and F32_MASK_FRAC;
@@ -1476,62 +1578,130 @@ case Exponent of
         // exponent of zero - zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // denormal
-            If GetSSEFlag(flMUnderflow) then
-              // convert to signed zero
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16)
-            else
-              // signal underflow
-              raise EUnderflow.Create('Floating point underflow');
+            // non-zero mantissa - denormals
+            If not GetSSEFlag(flDenormalsAreZeros) then
+              begin
+                // DAZ mode inactive
+                If GetSSEExceptionMask(excDenormal) then
+                  begin
+                    SetSSEExceptionFlag(excDenormal,True);
+                    If ((RoundMode = rmUp) and (Sign = 0)) or
+                       ((RoundMode = rmDown) and (Sign <> 0)) then
+                      // return signed smallest representable number
+                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
+                    else
+                      // convert to signed zero
+                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                    // post-computation exceptions, FTZ check
+                    {$message 'P359 - FTZ ignored for halfs?'}
+                    If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
+                      begin
+                        // FTZ mode active - return signed zero
+                        PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                        SetSSEExceptionFlag(excUnderflow,True);
+                        SetSSEExceptionFlag(excPrecision,True);
+                      end
+                    else
+                      begin
+                        // FTZ mode inactive - normal processing
+                        ExceptionSetOrRaise(excUnderflow);
+                        ExceptionSetOrRaise(excPrecision);
+                      end;
+                  end
+                else raise EF16UDenormal.CreateDefMsg;
+              end
+            // DAZ mode - return signed zero
+            else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
           end
-        // return signed zero
+        // mantissa of 0 - return signed zero
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
 
-        // exponent 1..101 (-126..-26 unbiased) - too small to be represented in half even as denormal
+      {
+        exponent 1..101 (-126..-26 unbiased) - exponent too small to be
+        represented in half even as denormal
+      }
    1..
-  $65:  If GetSSEFlag(flMUnderflow) then
-          begin
-            { do not delete yet
-            If ((RoundMode = 1{down}) and (Sign <> 0)) or
-               ((RoundMode = 2{up}) and (Sign = 0)) then
-              // convert to smallest representable number
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
-            else
-            }
-              // convert to signed zero
+  $65:  begin
+          If ((RoundMode = rmUp) and (Sign = 0)) or
+             ((RoundMode = rmDown) and (Sign <> 0)) then
+            // return signed smallest representable number
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
+          else
+            // convert to signed zero
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+          {$message 'P359 - FTZ ignored for halfs?'}
+          // post-computation exceptions, FTZ check
+          If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
+            begin
+              // FTZ mode active - return signed zero
               PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
-          end
-        // signal underflow
-        else raise EUnderflow.Create('Floating point underflow');
+              SetSSEExceptionFlag(excUnderflow,True);
+              SetSSEExceptionFlag(excPrecision,True);
+            end
+          else
+            begin
+              // FTZ mode inactive - normal processing
+              ExceptionSetOrRaise(excUnderflow);
+              ExceptionSetOrRaise(excPrecision);
+            end;
+        end;
 
-        // exponent 102..112 (-25..-15 unbiased) - exponent still too small to be represented in half,
-        // but the result can be denormalized (implicit exponent of -14, explicit 0)
+      {
+        exponent 102..112 (-25..-15 unbiased) - exponent still too small to be
+        represented in half, but the result can be denormalized (implicit
+        exponent of -14, explicit 0)
+      }
   $66..
-  $70:  If GetSSEFlag(flMUnderflow) then
-          // denormalizing
-          PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent))
-        else
-          // signal underflow
-          raise EUnderflow.Create('Floating point underflow');
+  $70:  begin
+        {
+          denormalize
 
-        // exponent 143..254 (+16..+127 unbiased) - too large to be represented
-        // in half (resulting exponent would be larger than 15)
+          Note that mantissa can overflow into exponent, this is normal and
+          expected.
+        }
+          PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent,BitsLost));
+          If BitsLost then
+            begin
+              // post-computation exceptions
+              If (PUInt16(HalfPtr)^ and F16_MASK_EXP) = 0 then
+                begin
+                  // number was NOT converted to normalized encoding
+                  If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
+                    begin
+                      // FTZ mode active - return signed zero
+                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                      SetSSEExceptionFlag(excUnderflow,True);
+                      SetSSEExceptionFlag(excPrecision,True);
+                    end
+                  else
+                    begin
+                      // FTZ mode inactive - normal processing
+                      ExceptionSetOrRaise(excUnderflow);
+                      ExceptionSetOrRaise(excPrecision);
+                    end;
+                end
+              else ExceptionSetOrRaise(excPrecision);
+            end;
+        end;
+
+      {
+        exponent 143..254 (+16..+127 unbiased) - too large to be represented
+        in half (resulting exponent would be larger than 15)
+      }
   $8F..
-  $FE:  If GetSSEFlag(flMOverflow) then
-          begin
-            {
-            If (RoundMode = 3{trunc}) or
-               ((RoundMode = 1{down}) and (Sign = 0)) or
-               ((RoundMode = 2{up}) and (Sign <> 0)) then
-              // convert to largest representable number
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
-            else
-            }
-              // convert to signed infinity
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
-          end
-        // signal overflow
-        else raise EOverflow.Create('Floating point overflow');
+  $FE:  begin
+          If (RoundMode = rmTruncate) or
+             ((RoundMode = rmUp) and (Sign <> 0)) or
+             ((RoundMode = rmDown) and (Sign = 0)) then
+            // return signed largest representable number
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
+          else
+            // convert to signed infinity
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
+          // post-computation exceptions
+          ExceptionSetOrRaise(excOverflow);
+          ExceptionSetOrRaise(excPrecision);
+        end;
 
         // max exponent - infinity or NaN
   $FF:  If Mantissa <> 0 then
@@ -1539,33 +1709,44 @@ case Exponent of
             // not a number (NaN)
             If (Mantissa and F32_MASK_FHB) = 0 then
               begin
-                // signalled NaN
-                If GetSSEFlag(flMInvalidOP) then
-                  // quiet signed NaN with truncated mantissa
-                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or F16_MASK_FHB or
-                                       UInt16(Mantissa shr 13)
-                else
-                  // signaling NaN
-                  raise EInvalidOp.Create('Invalid floating point operation');
+                // signaling NaN
+                If GetSSEExceptionMask(excInvalidOP) then
+                  begin
+                    // return quiet signed NaN with truncated mantissa
+                    SetSSEExceptionFlag(excInvalidOP,True);
+                    PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or F16_MASK_FHB or
+                                         UInt16(Mantissa shr 13);
+                  end
+                // singal NaN
+                else raise EF16UInvalidOP.CreateDefMsg;
               end
             // quiet signed NaN with truncated mantisssa
             else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or
                                       UInt16(Mantissa shr 13);
           end
-        // signed infinity
+        // return signed infinity
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
-        
+
 else
   // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
-  Mantissa := ShiftMantissa(Mantissa,13);
+  Mantissa := ShiftMantissa(Mantissa,13,BitsLost);
   // check if mantisa overflowed, if so, increase exponent to compensate (mantissa will be zero)
   If Mantissa > F16_MASK_FRAC then
-    Inc(Exponent);
+    begin
+      Inc(Exponent);
+      ManOverflow := True;
+    end
+  else ManOverflow := False;
   PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
                        UInt16((Exponent - 112) shl 10) or
                        UInt16(Mantissa and F16_MASK_FRAC);
+  // post-computation exceptions
+  If ManOverflow and (Exponent > 142) then
+    // number was converted to infinity
+    ExceptionSetOrRaise(excOverflow);
+  If BitsLost then
+    ExceptionSetOrRaise(excPrecision);
 end;
-*)
 end;
 
 //==============================================================================
@@ -1597,59 +1778,59 @@ end;
 {$IFNDEF PurePascal}
 
 {$IFDEF ASMSuppressSizeWarnings}
+  {$PUSH}
   {$WARN 2087 OFF}  //  Suppresses warnings on following $WARN
   {$WARN 7121 OFF}  //  Warning: Check size of memory operand "op: memory-operand-size is X bits, but expected [Y bits]"
 {$ENDIF}
 
-procedure Fce_HalfToSingle_Asm(Input,Output: Pointer); register; assembler;
+procedure Fce_HalfToSingle_Asm(HalfPtr,SinglePtr: Pointer); register; assembler;
 asm
-    MOVZX   EAX,  word ptr [Input]
+    MOVZX   EAX,  word ptr [HalfPtr]
     MOVD    XMM0, EAX
 
     DB  $C4, $E2, $79, $13, $C0         // VCVTPH2PS  XMM0, XMM0
 
-    MOVSS   dword ptr [Output], XMM0
+    MOVSS   dword ptr [SinglePtr], XMM0
 end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingleToHalf_Asm(Input,Output: Pointer); register; assembler;
+procedure Fce_SingleToHalf_Asm(SinglePtr,HalfPtr: Pointer); register; assembler;
 asm
-    MOVSS   XMM0, dword ptr [Input]
+    MOVSS   XMM0, dword ptr [SinglePtr]
 
-    // $04 - rounding set in MXCSR is used  
+    // $04 - rounding selected in MXCSR is used
     DB  $C4, $E3, $79, $1D, $C0, $04    // VCVTPS2PH  XMM0, XMM0, $04
 
     MOVD    EAX,  XMM0
-    MOV     word ptr [Output],  AX
+    MOV     word ptr [HalfPtr],  AX
 end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_HalfToSingle4x_Asm(Input,Output: Pointer); register; assembler;
+procedure Fce_HalfToSingle4x_Asm(HalfPtr,SinglePtr: Pointer); register; assembler;
 asm
-    MOVSD   XMM0, qword ptr [Input]
+    MOVSD   XMM0, qword ptr [HalfPtr]
 
     DB  $C4, $E2, $79, $13, $C0         // VCVTPH2PS  XMM0, XMM0
 
-    MOVUPS  dqword ptr [Output],  XMM0
+    MOVUPS  dqword ptr [SinglePtr],  XMM0
 end;
 
 //------------------------------------------------------------------------------
 
-procedure Fce_SingletoHalf4x_Asm(Input,Output: Pointer); register; assembler;
+procedure Fce_SingletoHalf4x_Asm(SinglePtr,HalfPtr: Pointer); register; assembler;
 asm
-    MOVUPS  XMM0, dqword ptr [Input]
+    MOVUPS  XMM0, dqword ptr [SinglePtr]
 
-    // $04 - rounding set in MXCSR is used 
+    // $04 - rounding selected in MXCSR is used
     DB  $C4, $E3, $79, $1D, $C0, $04    // VCVTPS2PH  XMM0, XMM0, $04
 
-    MOVSD   qword ptr [Output],   XMM0
+    MOVSD   qword ptr [HalfPtr],   XMM0
 end;
 
 {$IFDEF ASMSuppressSizeWarnings}
-  {$WARN 7121 ON}
-  {$WARN 2087 ON}
+  {$POP}
 {$ENDIF}
 
 {$ENDIF}
@@ -1657,10 +1838,10 @@ end;
 //==============================================================================
 
 var
-  Var_HalfToSingle:   procedure(Input,Output: Pointer); register;
-  Var_SingleToHalf:   procedure(Input,Output: Pointer); register;
-  Var_HalfToSingle4x: procedure(Input,Output: Pointer); register;
-  Var_SingleToHalf4x: procedure(Input,Output: Pointer); register;
+  Var_HalfToSingle:   procedure(HalfPtr,SinglePtr: Pointer); register;
+  Var_SingleToHalf:   procedure(SinglePtr,HalfPtr: Pointer); register;
+  Var_HalfToSingle4x: procedure(HalfPtr,SinglePtr: Pointer); register;
+  Var_SingleToHalf4x: procedure(SinglePtr,HalfPtr: Pointer); register;
 
 //==============================================================================
 
@@ -1674,6 +1855,20 @@ end;
 Function MapWordToHalf(Value: UInt16): Half;
 begin
 Result := Half(Addr(Value)^);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure HalfToSingle(HalfPtr,SinglePtr: Pointer);
+begin
+Var_HalfToSingle(HalfPtr,SinglePtr);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SingleToHalf(SinglePtr,HalfPtr: Pointer);
+begin
+Var_SingleToHalf(SinglePtr,HalfPtr);
 end;
 
 //------------------------------------------------------------------------------
@@ -1692,16 +1887,16 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure HalfToSingle4x(Input,Output: Pointer);
+procedure HalfToSingle4x(HalfPtr,SinglePtr: Pointer);
 begin
-Var_HalfToSingle4x(Input,Output);
+Var_HalfToSingle4x(HalfPtr,SinglePtr);
 end;
 
 //------------------------------------------------------------------------------
 
-procedure SingleToHalf4x(Input,Output: Pointer);
+procedure SingleToHalf4x(SinglePtr,HalfPtr: Pointer);
 begin
-Var_SingleToHalf4x(Input,Output);
+Var_SingleToHalf4x(SinglePtr,HalfPtr);
 end;
 
 
@@ -1921,6 +2116,65 @@ Function Divide(const A,B: Half): Half;
 begin
 Result := SingleToHalf(HalfToSingle(A) / HalfToSingle(B));
 end;
+
+
+{-------------------------------------------------------------------------------
+================================================================================
+                            Type half decode/encode
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    Type half decode/encode - declaration
+===============================================================================}
+
+procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+var
+  _Value: UInt16 absolute Value;
+begin
+Sign := (_Value and F16_MASK_SIGN) <> 0;
+If BiasedExp then
+  Exponent := (_Value and F16_MASK_EXP) shr 10
+else
+  Exponent := ((_Value and F16_MASK_EXP) shr 10) - FLOAT16_EXPONENTBIAS;
+If IntBit then
+  begin
+    If IsDenormal(Value) or IsZero(Value) then
+      Mantissa := _Value and F16_MASK_FRAC
+    else
+      Mantissa := (_Value and F16_MASK_FRAC) or F16_MASK_INTB;
+  end
+else Mantissa := _Value and F16_MASK_FRAC;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat16(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
+
+//==============================================================================
+
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+var
+  _Result:  UInt16 absolute Result;
+begin
+_Result := Mantissa and F16_MASK_FRAC;
+If BiasedExp then
+  _Result := _Result or ((Exponent shl 10) and F16_MASK_EXP)
+else
+  _Result := _Result or (((Exponent + FLOAT16_EXPONENTBIAS) shl 10) and F16_MASK_EXP); 
+If Sign then
+  _Result := _Result or F16_MASK_SIGN;
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+begin
+Result := EncodeFloat16(Mantissa,Exponent,Sign,BiasedExp);
+end;
+
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
@@ -2207,6 +2461,7 @@ procedure Initialize;
 var
   i:  TUIM_Float16Utils_Function;
 begin
+MXCSR_MASK_Init(not UIM_CheckASMSupport(fnMXCSRAccess));
 For i := Low(TUIM_Float16Utils_Function) to High(TUIM_Float16Utils_Function) do
   If UIM_CheckASMSupport(i) then
     UIM_Float16Utils_SetFuncImpl(i,imAssembly)
