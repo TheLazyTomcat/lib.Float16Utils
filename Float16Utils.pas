@@ -69,7 +69,11 @@ unit Float16Utils;
   {$DEFINE PurePascal}
 {$ENDIF}
 
-{$IF not(Defined(CPU386) or Defined(CPUX86_64) or Defined(CPUX64))}
+{$IF defined(CPUX86_64) or defined(CPUX64)}
+  {$DEFINE x64}
+{$ELSEIF defined(CPU386)}
+  {$DEFINE x86}
+{$ELSE}
   {$DEFINE PurePascal}
 {$IFEND}
 
@@ -115,10 +119,14 @@ unit Float16Utils;
 
   When defined, pascal implementation of Half to Single conversion is done using
   large lookup table.
+
   This is faster than procedural conversion, but inclusion of this table
   increases size of the resulting binary by about 128KiB and prevents raising
   of any unmasked floating-point exception and indication of masked exceptions
   (result of the conversion is the same as if all exceptions would be masked).
+  If also means the conversion does not honor settings from MXCSR (rounding,
+  DAZ and FTZ modes) - the table contains values as if rounding was se to
+  nearest and both DAZ and FTZ modes were disabled.
 
   Not defined by default.
 }
@@ -872,6 +880,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF F16U_ASM_IMPL}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 procedure MXCSR_MASK_Init(EmulatedImpl: Boolean);
 {$IFDEF F16U_ASM_IMPL}
 var
@@ -904,6 +913,7 @@ begin
 MXCSR_MASK := $0000FFFF;  // DAZ bit supported
 end;
 {$ENDIF}
+{$IFNDEF F16U_ASM_IMPL}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 {-------------------------------------------------------------------------------
     Auxiliary routines - SSE status and control register (MXCSR) access
@@ -911,7 +921,7 @@ end;
 
 threadvar
   Pas_MXCSR:  UInt32;
-  MXCSRInit:  Boolean;
+  MXCSRInit:  Boolean;  // compiler initializes this to false
 
 //------------------------------------------------------------------------------
 
@@ -923,7 +933,11 @@ var
 asm
     STMXCSR   dword ptr [Temp]
     MOV       EAX,  dword ptr [Temp]
+  {$IFDEF x64}
+    AND       EAX,  dword ptr [RIP + MXCSR_MASK]
+  {$ELSE}
     AND       EAX,  dword ptr [MXCSR_MASK]
+  {$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
@@ -932,7 +946,11 @@ procedure Fce_SetMXCSR_Asm(NewValue: UInt32); register; assembler;
 var
   Temp: UInt32;
 asm
+ {$IFDEF x64}
+    AND       NewValue, dword ptr [RIP + MXCSR_MASK]
+{$ELSE}
     AND       NewValue, dword ptr [MXCSR_MASK]
+ {$ENDIF}
     MOV       dword ptr [Temp], NewValue
     LDMXCSR   dword ptr [Temp]
 end;
@@ -1500,6 +1518,7 @@ var
   Exponent:     Int32;  // biased exponent (true exponent + 127)
   Mantissa:     UInt32;
   RoundMode:    TSSERoundingMode;
+  ResultTemp:   UInt16;
   BitsLost:     Boolean;
   ManOverflow:  Boolean;
 
@@ -1588,24 +1607,28 @@ case Exponent of
                     If ((RoundMode = rmUp) and (Sign = 0)) or
                        ((RoundMode = rmDown) and (Sign <> 0)) then
                       // return signed smallest representable number
-                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
+                      ResultTemp := UInt16(Sign shr 16) or UInt16(1)
                     else
                       // convert to signed zero
-                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                      ResultTemp := UInt16(Sign shr 16);
                     // post-computation exceptions, FTZ check
                     {$message 'P359 - FTZ ignored for halfs?'}
                     If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
                       begin
                         // FTZ mode active - return signed zero
-                        PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                        ResultTemp := UInt16(Sign shr 16);
                         SetSSEExceptionFlag(excUnderflow,True);
                         SetSSEExceptionFlag(excPrecision,True);
+                        PUInt16(HalfPtr)^ := ResultTemp;
+                        {$message 'P111 - does SSE update results at the total end - or, like x87, after over/underflow exc. check?'}
                       end
                     else
                       begin
                         // FTZ mode inactive - normal processing
                         ExceptionSetOrRaise(excUnderflow);
                         ExceptionSetOrRaise(excPrecision);
+                        PUInt16(HalfPtr)^ := ResultTemp;
+                        {$message 'P359 - pe set for unmasked ue?'}
                       end;
                   end
                 else raise EF16UDenormal.CreateDefMsg;
@@ -1625,24 +1648,26 @@ case Exponent of
           If ((RoundMode = rmUp) and (Sign = 0)) or
              ((RoundMode = rmDown) and (Sign <> 0)) then
             // return signed smallest representable number
-            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
+            ResultTemp := UInt16(Sign shr 16) or UInt16(1)
           else
             // convert to signed zero
-            PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+            ResultTemp := UInt16(Sign shr 16);
           {$message 'P359 - FTZ ignored for halfs?'}
           // post-computation exceptions, FTZ check
           If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
             begin
               // FTZ mode active - return signed zero
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+              ResultTemp := UInt16(Sign shr 16);
               SetSSEExceptionFlag(excUnderflow,True);
               SetSSEExceptionFlag(excPrecision,True);
+              PUInt16(HalfPtr)^ := ResultTemp;
             end
           else
             begin
               // FTZ mode inactive - normal processing
               ExceptionSetOrRaise(excUnderflow);
               ExceptionSetOrRaise(excPrecision);
+              PUInt16(HalfPtr)^ := ResultTemp;
             end;
         end;
 
@@ -1659,28 +1684,36 @@ case Exponent of
           Note that mantissa can overflow into exponent, this is normal and
           expected.
         }
-          PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent,BitsLost));
-          If BitsLost then
+          ResultTemp := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent,BitsLost));
+          // post-computation exceptions
+          If GetSSEExceptionMask(excUnderflow) then
             begin
-              // post-computation exceptions
-              If (PUInt16(HalfPtr)^ and F16_MASK_EXP) = 0 then
+              // underflow exception masked
+              If BitsLost then
                 begin
-                  // number was NOT converted to normalized encoding
-                  If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
+                  // inexact result
+                  If (ResultTemp and F16_MASK_EXP) = 0 then
                     begin
-                      // FTZ mode active - return signed zero
-                      PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
-                      SetSSEExceptionFlag(excUnderflow,True);
-                      SetSSEExceptionFlag(excPrecision,True);
-                    end
-                  else
-                    begin
-                      // FTZ mode inactive - normal processing
+                      // result is denormal
+                      If GetSSEFlag(flFlushToZero) then
+                        // FTZ mode active - flush to signed zero
+                        ResultTemp := UInt16(Sign shr 16);
                       ExceptionSetOrRaise(excUnderflow);
-                      ExceptionSetOrRaise(excPrecision);
                     end;
+                  ExceptionSetOrRaise(excPrecision);
+                  PUInt16(HalfPtr)^ := ResultTemp;
                 end
-              else ExceptionSetOrRaise(excPrecision);
+              else PUInt16(HalfPtr)^ := ResultTemp;
+            end
+          else
+            begin
+              // underflow exception not masked
+              If (ResultTemp and F16_MASK_EXP) = 0 then
+                raise EF16UUnderflow.CreateDefMsg;
+              If BitsLost then
+                // inexact result
+                ExceptionSetOrRaise(excPrecision);
+              PUInt16(HalfPtr)^ := ResultTemp;
             end;
         end;
 
@@ -1694,13 +1727,14 @@ case Exponent of
              ((RoundMode = rmUp) and (Sign <> 0)) or
              ((RoundMode = rmDown) and (Sign = 0)) then
             // return signed largest representable number
-            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
+            ResultTemp:= UInt16(Sign shr 16) or UInt16($7BFF)
           else
             // convert to signed infinity
-            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
+            ResultTemp := UInt16(Sign shr 16) or F16_MASK_EXP;
           // post-computation exceptions
           ExceptionSetOrRaise(excOverflow);
           ExceptionSetOrRaise(excPrecision);
+          PUInt16(HalfPtr)^ := ResultTemp;
         end;
 
         // max exponent - infinity or NaN
@@ -1730,22 +1764,23 @@ case Exponent of
 else
   // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
   Mantissa := ShiftMantissa(Mantissa,13,BitsLost);
-  // check if mantisa overflowed, if so, increase exponent to compensate (mantissa will be zero)
+  // check if mantisa overflowed, if so, increase exponent to compensate
   If Mantissa > F16_MASK_FRAC then
     begin
       Inc(Exponent);
       ManOverflow := True;
     end
   else ManOverflow := False;
-  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
-                       UInt16((Exponent - 112) shl 10) or
-                       UInt16(Mantissa and F16_MASK_FRAC);
+  ResultTemp := UInt16(Sign shr 16) or
+                UInt16((Exponent - 112) shl 10) or
+                UInt16(Mantissa and F16_MASK_FRAC);
   // post-computation exceptions
   If ManOverflow and (Exponent > 142) then
     // number was converted to infinity
     ExceptionSetOrRaise(excOverflow);
   If BitsLost then
     ExceptionSetOrRaise(excPrecision);
+  PUInt16(HalfPtr)^ := ResultTemp;
 end;
 end;
 
