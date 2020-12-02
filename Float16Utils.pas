@@ -256,14 +256,14 @@ const
 
   Returns current value of MXCSR register.
 }
-Function GetMXCSR: UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+Function GetMXCSR: UInt32;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {
   SetMXCSR
 
   Sets MXCSR register to a passed value.
 }
-procedure SetMXCSR(NewValue: UInt32);{$IFDEF CanInline} inline;{$ENDIF}
+procedure SetMXCSR(NewValue: UInt32);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {
   EmulatedMXCSR
@@ -271,7 +271,7 @@ procedure SetMXCSR(NewValue: UInt32);{$IFDEF CanInline} inline;{$ENDIF}
   Returns true when a real MXCSR register is used, false when operating on an
   emulated local implementation.
 }
-Function EmulatedMXCSR: Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function EmulatedMXCSR: Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {
   Sets MXCSR register to $00001900 - denormal, underflow and precision
@@ -297,7 +297,7 @@ procedure InitMXCSR;{$IFDEF CanInline} inline;{$ENDIF}
   This value is only informative, the masking is done automatically in calls to
   functions GetMXCSR and SetMXCSR.
 }
-Function GetMXCSRMask: UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+Function GetMXCSRMask: UInt32;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {
   GetMXCSRSupportsDAZ
@@ -306,7 +306,7 @@ Function GetMXCSRMask: UInt32;{$IFDEF CanInline} inline;{$ENDIF}
   supported by the used implementation of MXCSR (be it true SSE register or
   an emulation). False when not supported.
 }
-Function GetMXCSRSupportsDAZ: Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function GetMXCSRSupportsDAZ: Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
     Abstracted access
@@ -1616,11 +1616,9 @@ case Exponent of
                     If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
                       begin
                         // FTZ mode active - return signed zero
-                        ResultTemp := UInt16(Sign shr 16);
                         SetSSEExceptionFlag(excUnderflow,True);
                         SetSSEExceptionFlag(excPrecision,True);
-                        PUInt16(HalfPtr)^ := ResultTemp;
-                        {$message 'P111 - does SSE update results at the total end - or, like x87, after over/underflow exc. check?'}
+                        PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
                       end
                     else
                       begin
@@ -1657,10 +1655,9 @@ case Exponent of
           If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
             begin
               // FTZ mode active - return signed zero
-              ResultTemp := UInt16(Sign shr 16);
               SetSSEExceptionFlag(excUnderflow,True);
               SetSSEExceptionFlag(excPrecision,True);
-              PUInt16(HalfPtr)^ := ResultTemp;
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
             end
           else
             begin
@@ -1764,7 +1761,7 @@ case Exponent of
 else
   // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
   Mantissa := ShiftMantissa(Mantissa,13,BitsLost);
-  // check if mantisa overflowed, if so, increase exponent to compensate
+  // check if mantisa overflowed - if so, increase exponent to compensate
   If Mantissa > F16_MASK_FRAC then
     begin
       Inc(Exponent);
@@ -2379,6 +2376,7 @@ try
     fnMXCSRAccess,
     fnHalfToSingle,fnSingleToHalf,
     fnHalfToSingle4x,fnSingleToHalf4x:
+      // SSE2 for MOVD instruction
       Result := Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2;
   else
     raise EF16UUnknownFunction.CreateFmt('UIM_CheckASMSupport: Unknown function (%d).',[Ord(Func)]);
