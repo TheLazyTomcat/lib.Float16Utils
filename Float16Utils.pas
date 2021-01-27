@@ -20,8 +20,8 @@
     F16C extension is used when symbol AllowF16CExtension is defined, PurePascal
     is not defined, and when (and only when) it is supported by the CPU and OS.
 
-    Implemented Half should conform to IEEE 754-2008, meaning it has one sign
-    bit (value is negative when sign bit is set, positive otherwise), 5 bits of
+    Implemented Half conforms to IEEE 754-2008, meaning it has one sign bit
+    (value is negative when sign bit is set, positive otherwise), 5 bits of
     biased exponent (exponent bias is 15) and 11 bit mantissa (10 bits
     explicitly stored, highest bit is assumed to be zero for denormal numbers,
     one otherwise)
@@ -30,9 +30,9 @@
 
   Version 1.0.3 (2020-11-09)
 
-  Last change 2020-11-09
+  Last change 2021-01-27
 
-  ©2017-2020 František Milt
+  ©2017-2021 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -173,10 +173,16 @@ type
 -------------------------------------------------------------------------------}
 type
   EF16UFPUException = class(EF16UException)
+  private
+    fExceptionFlags:  UInt32;
   protected
     Function DefaultMessage: String; virtual; abstract;
+    procedure ClearExceptionFlag; virtual; abstract;
   public
+    constructor Create(const Msg: String);
     constructor CreateDefMsg;
+    // ExceptionFlags holds state of exception flags when this exception was created
+    property ExceptionFlags: UInt32 read fExceptionFlags;
   end;
 
 {-------------------------------------------------------------------------------
@@ -186,31 +192,37 @@ type
   EF16UInvalidOp = class(EF16UFPUException) // invalid operation/operand
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
   EF16UDenormal = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
   EF16UDivByZero = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
   EF16UOverflow = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
   EF16UUnderflow = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
   EF16UPrecision = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
+    procedure ClearExceptionFlag; override;
   end;
 
 {-------------------------------------------------------------------------------
@@ -505,7 +517,7 @@ procedure RaiseSSEExceptions; overload;
 }
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
 {
-  MapHalfToWord
+  MapWordToHalf
 
   Directly maps 16bit unsigned integer to type half - no convesion is done.
 }
@@ -606,29 +618,22 @@ Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 {-------------------------------------------------------------------------------
 ================================================================================
-                            Type half decode/encode
+                              Floats encode/decode
 ================================================================================
 -------------------------------------------------------------------------------}
 {===============================================================================
-    Type half decode/encode - declaration
+    Floats encode/decode - declaration
 ===============================================================================}
+
+Function MapToFloat16(Value: UInt16): Float16;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapToHalf(Value: UInt16): Float16;{$IFDEF CanInline} inline;{$ENDIF}
+
+Function MapFromFloat16(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapFromHalf(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+
+//------------------------------------------------------------------------------
 {
-  DecodeFloat16
-  DecodeHalf
-
-  When BiasedExp is set to true, the returned exponent is exponent as it is
-  stored in the value, that is, biased. When false, the returned exponent is
-  unbiased (its true value).
-
-  When IntBit is set to true, the returned mantissa contains the integer bit
-  (bit 11) inferred from the number class (0 for denormals and zero,
-  1 otherwise). When false, the integer bit is masked-out and is zero,
-  irrespective of actual value.
-}
-procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
-procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
-
-{
+  EncodeFloat16Buffer
   EncodeFloat16
   EncodeHalf
 
@@ -636,11 +641,43 @@ procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8
   biased and will be stored as is. When false, the passed exponent will be
   biased before storing.
 
+    NOTE - the valid range for exponent is -14..+15 when biased, 0..31
+           when unbiased. The exponent is clamped (limited to a prescribed
+           range) before biasing and storing.
+
   Integer bit, when passed in the mantissa, is ignored - it is implied for
   half-precision float.
+
+    NOTE - only lowest 10 bits of the mantissa are used, other bits gets
+           masked-out before storage.
 }
-Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+procedure EncodeFloat16Buffer(out Buffer; Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False);
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;{$IFDEF CanInline} inline;{$ENDIF}
 Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  DecodeFloat16Buffer
+  DecodeFloat16
+  DecodeHalf
+
+  When BiasedExp is set to true, the returned exponent is exponent as it is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+    NOTE - returned exponent will be within range of -14..+15 when biased,
+           0..31 when unbiased.
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 11) inferred from the number class (0 for denormals and zero,
+  1 otherwise). When false, the integer bit is masked-out and is zero,
+  irrespective of actual value.
+
+    NOTE - only lowest 10 (11 with integer bit) bits of the mantissa are valid,
+           other bits will always be zero.
+}
+procedure DecodeFloat16Buffer(const Buffer; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 
 {$IFDEF FPC}
@@ -691,7 +728,7 @@ operator / (A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 -------------------------------------------------------------------------------}
 {
   WARNING - be wery careful when changing the selected implementation, as there
-            is absolutely no thread-safety protection
+            is absolutely no thread-safety protection.
 
   For full description of this section, please refer to the same section in
   BitOps library (github.com/TheLazyTomcat/Lib.BitOps), file BitOps.pas.
@@ -731,7 +768,7 @@ Function UIM_Float16Utils_GetFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Fl
   Returned value is the previous routing.
 
   NOTE - when routing for fnMXCSRAccess, both GetMXCSR and SetMXCSR are set to
-         the same implementation - sanity precaution, so the two functions do
+         the same implementation - sanity protection, so the two functions do
          not operate on different domains
 
   NOTE - when asm implementation cannot be used, and you still select it,
@@ -742,8 +779,8 @@ Function UIM_Float16Utils_GetFuncImpl(Func: TUIM_Float16Utils_Function): TUIM_Fl
             sake of speed, does not check validity, it will result in an
             exception when calling this function
 
-  WANRING - when selecting unsupported implementation, calling the function will
-            almost certainly result in an system exception (invalid
+  WANRING - when selecting unsupported implementation, calling the function
+            will almost certainly result in an system exception (invalid
             instruction).
 }
 Function UIM_Float16Utils_SetFuncImpl(Func: TUIM_Float16Utils_Function; NewImpl: TUIM_Float16Utils_Implementation): TUIM_Float16Utils_Implementation;
@@ -783,12 +820,23 @@ const
   F32_MASK_FHB  = UInt32($00400000);
   F32_MASK_INTB = UInt32($00800000);
 
+  F32_MASK_REMB = UInt32($00001FFF);  // 13 bits removed from single mantissa when converting to half mantissa
+
 {===============================================================================
     Library-specific exceptions - implementation
 ===============================================================================}
 {-------------------------------------------------------------------------------
     Library-specific exceptions - floating-point exceptions
 -------------------------------------------------------------------------------}
+
+constructor EF16UFPUException.Create(const Msg: String);
+begin
+inherited Create(Msg);
+fExceptionFlags := GetMXCSR;
+ClearExceptionFlag;
+end;
+
+//------------------------------------------------------------------------------
 
 constructor EF16UFPUException.CreateDefMsg;
 begin
@@ -806,12 +854,28 @@ end;
 
 //------------------------------------------------------------------------------
 
+procedure EF16UInvalidOp.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excInvalidOP,False);
+end;
+
+//==============================================================================
+
 Function EF16UDenormal.DefaultMessage: String;
 begin
 Result := 'Denormal floating point operand';
 end;
 
 //------------------------------------------------------------------------------
+
+procedure EF16UDenormal.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excDenormal,False);
+end;
+
+//==============================================================================
 
 Function EF16UDivByZero.DefaultMessage: String;
 begin
@@ -820,12 +884,28 @@ end;
 
 //------------------------------------------------------------------------------
 
+procedure EF16UDivByZero.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excDivByZero,False);
+end;
+
+//==============================================================================
+
 Function EF16UOverflow.DefaultMessage: String;
 begin
 Result := 'Floating point arithmetic overflow';
 end;
 
 //------------------------------------------------------------------------------
+
+procedure EF16UOverflow.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excOverflow,False);
+end;
+
+//==============================================================================
 
 Function EF16UUnderflow.DefaultMessage: String;
 begin
@@ -834,9 +914,25 @@ end;
 
 //------------------------------------------------------------------------------
 
+procedure EF16UUnderflow.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excUnderflow,False);
+end;
+
+//==============================================================================
+
 Function EF16UPrecision.DefaultMessage: String;
 begin
 Result := 'Inexact floating point result';
+end;
+
+//------------------------------------------------------------------------------
+
+procedure EF16UPrecision.ClearExceptionFlag;
+begin
+If EmulatedMXCSR then
+  SetSSEExceptionFlag(excPrecision,False);
 end;
 
 {-------------------------------------------------------------------------------
@@ -849,8 +945,7 @@ end;
 ===============================================================================}
 {-------------------------------------------------------------------------------
     Auxiliary routines - internal functions
--------------------------------------------------------------------------------}
-
+-------------------------------------------------------------------------------} 
 {
   WARNING - MXCSR_MASK is initialized once and only once, at the unit
             initialization. It must not be written into later at any cost, that
@@ -866,10 +961,11 @@ var
 Function MXCSR_MASK_Load(Mem: Pointer): UInt32; register; assembler;
 asm
 {
-  - FXSAVE does not check for pending FPU exceptions, therefore FWAIT to be sure
+  - FXSAVE does not check for pending FPU exceptions, therefore added FWAIT to
+    be sure
   - state saved by FXSAVE can contain MXCSR_MASK provided by the CPU (it if is
     zero, CPU is not providing it)
-  - position of the mask is the same in all modes (offset 28) - no need to
+  - position of the mask is the same in all CPU modes (offset 28) - no need to
     branch for individual modes
 }
     FWAIT
@@ -965,7 +1061,7 @@ If not MXCSRInit then
   begin
   {
     rounding set to nearest, masked precission, underflow and denormal
-    exceptions, DAZ and FTZ flags are clear, exception states are all clear
+    exceptions, DAZ and FTZ flags are cleared, exception flags are all cleared
 
     note - hardware initialization value is $00001F80
   }
@@ -1412,6 +1508,52 @@ end;
     Auxiliary routines - conversion functions
 -------------------------------------------------------------------------------}
 
+procedure SignalSSEExceptions(Exceptions: TSSEExceptions); overload;
+var
+  i:      TSSEException;
+  Masks:  TSSEExceptions;
+begin
+SetSSEExceptionFlags(GetSSEExceptionFlags + Exceptions);
+Masks := GetSSEExceptionMasks;
+For i := Low(TSSEException) to High(TSSEException) do
+  If (i in Exceptions) and not(i in Masks) then
+    case i of
+      excDenormal:  raise EF16UDenormal.CreateDefMsg;
+      excDivByZero: raise EF16UDivByZero.CreateDefMsg;
+      excOverflow:  raise EF16UOverflow.CreateDefMsg;
+      excUnderflow: raise EF16UUnderflow.CreateDefMsg;
+      excPrecision: raise EF16UPrecision.CreateDefMsg;
+    else
+     {excInvalidOp}
+      raise EF16UInvalidOP.CreateDefMsg;
+    end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure SignalSSEExceptions(Exceptions: UInt32); overload;
+var
+  TempMXCSR:  UInt32;
+begin
+// faster implementation
+TempMXCSR := GetMXCSR;
+SetMXCSR(TempMXCSR or Exceptions);
+If (Exceptions and MXCSR_EFLAG_InvalidOP <> 0) and (TempMXCSR and MXCSR_EMASK_InvalidOP = 0) then
+  raise EF16UInvalidOP.CreateDefMsg;
+If (Exceptions and MXCSR_EFLAG_Denormal <> 0) and (TempMXCSR and MXCSR_EMASK_Denormal = 0) then
+  raise EF16UDenormal.CreateDefMsg;
+If (Exceptions and MXCSR_EFLAG_DivByZero <> 0) and (TempMXCSR and MXCSR_EMASK_DivByZero = 0) then
+  raise EF16UDivByZero.CreateDefMsg;
+If (Exceptions and MXCSR_EFLAG_Overflow <> 0) and (TempMXCSR and MXCSR_EMASK_Overflow = 0) then
+  raise EF16UOverflow.CreateDefMsg;
+If (Exceptions and MXCSR_EFLAG_Underflow <> 0) and (TempMXCSR and MXCSR_EMASK_Underflow = 0) then
+  raise EF16UUnderflow.CreateDefMsg;
+If (Exceptions and MXCSR_EFLAG_Precision <> 0) and (TempMXCSR and MXCSR_EMASK_Precision = 0) then
+  raise EF16UPrecision.CreateDefMsg;
+end;
+
+//------------------------------------------------------------------------------
+
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
 {$IFDEF H2S_Lookup}
   {$INCLUDE '.\Float16Utils.inc'}
@@ -1449,30 +1591,19 @@ case Exponent of
         // zero exponent - zero or denormal
     0:  If Mantissa <> 0 then
           begin
-            // denormal
-            If not GetSSEFlag(flDenormalsAreZeros) then
-              begin
-                // DAZ mode inactive
-                If GetSSEExceptionMask(excDenormal) then
-                  begin
-                    {$message 'P359 - half denormals not signaled?'}
-                    SetSSEExceptionFlag(excDenormal,True);
-                  {
-                    normalize...
+          {
+            denormal, normalize...
 
-                    ...shift mantissa left so that its highest set bit will be
-                    shifted to implicit integer bit (bit 23), also correct
-                    exponent to reflect this change
-                  }
-                    MantissaShift := HighZeroCount(Mantissa) + 8;
-                    PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
-                                           UInt32(UInt32(126 - MantissaShift) shl 23) or
-                                          (UInt32(UInt32(Mantissa) shl MantissaShift) and F32_MASK_FRAC);
-                  end
-                else raise EF16UDenormal.CreateDefMsg;
-              end
-            // DAZ mode - return signed zero
-            else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16);
+            ...shift mantissa left so that its highest set bit will be
+            shifted to implicit integer bit (bit 23), also correct
+            exponent to reflect this change
+
+            DAZ bit ignored, denormal exceptions not signaled
+          }
+            MantissaShift := HighZeroCount(Mantissa) + 8;
+            PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or
+                                   UInt32(UInt32(126 - MantissaShift) shl 23) or
+                                  (UInt32(UInt32(Mantissa) shl MantissaShift) and F32_MASK_FRAC);
           end
         // return signed zero
         else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16);
@@ -1484,15 +1615,10 @@ case Exponent of
             If (Mantissa and F16_MASK_FHB) = 0 then
               begin
                 // signaled NaN
-                If GetSSEExceptionMask(excInvalidOp) then
-                  begin
-                    SetSSEExceptionFlag(excInvalidOp,True);
-                    // quiet signed NaN with mantissa
-                    PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
-                                           F32_MASK_FHB or UInt32(UInt32(Mantissa) shl 13)
-                  end
-                // signaling NaN
-                else raise EF16UInvalidOp.CreateDefMsg;
+                SignalSSEExceptions(MXCSR_EFLAG_InvalidOp);
+                // no exception raised, return quiet signed NaN with mantissa
+                PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
+                                       F32_MASK_FHB or UInt32(UInt32(Mantissa) shl 13)
               end
             // quiet signed NaN with mantissa
             else PUInt32(SinglePtr)^ := UInt32(UInt32(Sign) shl 16) or F32_MASK_EXP or
@@ -1518,9 +1644,26 @@ var
   Exponent:     Int32;  // biased exponent (true exponent + 127)
   Mantissa:     UInt32;
   RoundMode:    TSSERoundingMode;
+  ManHighSet:   Integer;
   ResultTemp:   UInt16;
   BitsLost:     Boolean;
+  ConvMantissa: UInt32;
+  ConvBitsLost: Boolean;
   ManOverflow:  Boolean;
+  ExcsTemp:     UInt32;
+
+  Function BitScanReverse(Value: UInt32): Integer;
+  var
+    i:  Integer;
+  begin
+    Result := -1;
+    For i := 31 downto 0 do
+    If (Value shr i) and 1 <> 0 then
+      begin
+        Result := i;
+        Break;
+      end;
+  end;
 
   Function ShiftMantissa(Value: UInt32; Shift: Byte; out DataLoss: Boolean): UInt32;
   var
@@ -1536,7 +1679,7 @@ var
             DataLoss := True;
             Low := Value and not Mask;
             High := Low + (Mask + 1);
-            case GetSSERoundingMode of
+            case RoundMode of
               rmDown:     If Sign <> 0 then
                             Result := High shr Shift
                           else
@@ -1571,22 +1714,6 @@ var
       Result := Value;
   end;
 
-  procedure ExceptionSetOrRaise(SSEException: TSSEException);
-  begin
-    If not GetSSEExceptionMask(SSEException) then
-      case SSEException of
-        excDenormal:  raise EF16UDenormal.CreateDefMsg;
-        excDivByZero: raise EF16UDivByZero.CreateDefMsg;
-        excOverflow:  raise EF16UOverflow.CreateDefMsg;
-        excUnderflow: raise EF16UUnderflow.CreateDefMsg;
-        excPrecision: raise EF16UPrecision.CreateDefMsg;
-      else
-       {excInvalidOp}
-        raise EF16UInvalidOP.CreateDefMsg;
-      end
-    else SetSSEExceptionFlag(SSEException,True);
-  end;
-
 begin
 RoundMode := GetSSERoundingMode;
 Sign := PUInt32(SinglePtr)^ and F32_MASK_SIGN;
@@ -1601,35 +1728,30 @@ case Exponent of
             If not GetSSEFlag(flDenormalsAreZeros) then
               begin
                 // DAZ mode inactive
-                If GetSSEExceptionMask(excDenormal) then
+                // pre-computation exceptions
+                SignalSSEExceptions(MXCSR_EFLAG_Denormal);
+                // post-computation exceptions (FTZ ignored)
+                If not GetSSEExceptionMask(excUnderflow) then
                   begin
-                    SetSSEExceptionFlag(excDenormal,True);
-                    If ((RoundMode = rmUp) and (Sign = 0)) or
-                       ((RoundMode = rmDown) and (Sign <> 0)) then
-                      // return signed smallest representable number
-                      ResultTemp := UInt16(Sign shr 16) or UInt16(1)
-                    else
-                      // convert to signed zero
-                      ResultTemp := UInt16(Sign shr 16);
-                    // post-computation exceptions, FTZ check
-                    {$message 'P359 - FTZ ignored for halfs?'}
-                    If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
+                    ManHighSet := BitScanReverse(Mantissa); // returns zero-based index!
+                    If ManHighSet >= 11{mantissa width, including integer bit} then
                       begin
-                        // FTZ mode active - return signed zero
-                        SetSSEExceptionFlag(excUnderflow,True);
-                        SetSSEExceptionFlag(excPrecision,True);
-                        PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
+                        If Mantissa and (UInt32(Int32(-1)) shr (42 - ManHighSet)) <> 0 then
+                          SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision)
+                        else
+                          SignalSSEExceptions(MXCSR_EFLAG_Underflow);
                       end
-                    else
-                      begin
-                        // FTZ mode inactive - normal processing
-                        ExceptionSetOrRaise(excUnderflow);
-                        ExceptionSetOrRaise(excPrecision);
-                        PUInt16(HalfPtr)^ := ResultTemp;
-                        {$message 'P359 - pe set for unmasked ue?'}
-                      end;
+                    else SignalSSEExceptions(MXCSR_EFLAG_Underflow);
                   end
-                else raise EF16UDenormal.CreateDefMsg;
+                else SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision);
+                // no exception raised, return result
+                If ((RoundMode = rmUp) and (Sign = 0)) or
+                   ((RoundMode = rmDown) and (Sign <> 0)) then
+                  // return signed smallest representable number
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
+                else
+                  // convert to signed zero
+                  PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
               end
             // DAZ mode - return signed zero
             else PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
@@ -1643,74 +1765,80 @@ case Exponent of
       }
    1..
   $65:  begin
+          // post-computation exceptions (FTZ ignored)
+          If Mantissa and F32_MASK_REMB = 0 then
+            SignalSSEExceptions(MXCSR_EFLAG_Underflow);
+          SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision);          
+          // no exception raised, return result
           If ((RoundMode = rmUp) and (Sign = 0)) or
              ((RoundMode = rmDown) and (Sign <> 0)) then
             // return signed smallest representable number
-            ResultTemp := UInt16(Sign shr 16) or UInt16(1)
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(1)
           else
             // convert to signed zero
-            ResultTemp := UInt16(Sign shr 16);
-          {$message 'P359 - FTZ ignored for halfs?'}
-          // post-computation exceptions, FTZ check
-          If GetSSEFlag(flFlushToZero) and GetSSEExceptionMask(excUnderflow) then
-            begin
-              // FTZ mode active - return signed zero
-              SetSSEExceptionFlag(excUnderflow,True);
-              SetSSEExceptionFlag(excPrecision,True);
-              PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
-            end
-          else
-            begin
-              // FTZ mode inactive - normal processing
-              ExceptionSetOrRaise(excUnderflow);
-              ExceptionSetOrRaise(excPrecision);
-              PUInt16(HalfPtr)^ := ResultTemp;
-            end;
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16);
         end;
 
       {
-        exponent 102..112 (-25..-15 unbiased) - exponent still too small to be
+        exponent 102..111 (-25..-14 unbiased) - exponent still too small to be
         represented in half, but the result can be denormalized (implicit
         exponent of -14, explicit 0)
       }
   $66..
-  $70:  begin
-        {
-          denormalize
-
-          Note that mantissa can overflow into exponent, this is normal and
-          expected.
-        }
+  $6F:  begin
+          // post-computation exceptions (FTZ ignored)
+          ShiftMantissa(Mantissa,13,BitsLost);
+          If BitsLost then
+            begin
+              If GetSSEExceptionMask(excUnderflow) or not GetSSEExceptionMask(excPrecision) then
+                SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision)
+              else
+                SignalSSEExceptions(MXCSR_EFLAG_Precision);
+            end;
           ResultTemp := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,$7E - Exponent,BitsLost));
-          // post-computation exceptions
           If GetSSEExceptionMask(excUnderflow) then
             begin
-              // underflow exception masked
               If BitsLost then
+                SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision);
+            end
+          else SignalSSEExceptions(MXCSR_EFLAG_Underflow);
+          // no exception raised, return result
+          PUInt16(HalfPtr)^ := ResultTemp;
+        end;
+
+      {
+        exponent 112 (-15 unbiased) - similar to previous case, but with more
+        intricacies because of a posibility of overflow and renormalization
+      }
+  $70:  begin
+          // post-computation exceptions (FTZ ignored)
+          ConvMantissa := ShiftMantissa(Mantissa or F32_MASK_INTB,13,ConvBitsLost);
+          If ConvMantissa <> (F16_MASK_INTB shl 1) then
+            begin
+              // denormal after conversion
+              If ConvBitsLost then
                 begin
-                  // inexact result
-                  If (ResultTemp and F16_MASK_EXP) = 0 then
-                    begin
-                      // result is denormal
-                      If GetSSEFlag(flFlushToZero) then
-                        // FTZ mode active - flush to signed zero
-                        ResultTemp := UInt16(Sign shr 16);
-                      ExceptionSetOrRaise(excUnderflow);
-                    end;
-                  ExceptionSetOrRaise(excPrecision);
-                  PUInt16(HalfPtr)^ := ResultTemp;
+                  If GetSSEExceptionMask(excUnderflow) or not GetSSEExceptionMask(excPrecision) then
+                    SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision)
+                  else
+                    SignalSSEExceptions(MXCSR_EFLAG_Precision);                
+                end;
+              // gradual denormalization
+              ShiftMantissa(ConvMantissa,1,BitsLost);
+              If GetSSEExceptionMask(excUnderflow) then
+                begin
+                  If BitsLost or ConvBitsLost then
+                    SignalSSEExceptions(MXCSR_EFLAG_Underflow or MXCSR_EFLAG_Precision);
                 end
-              else PUInt16(HalfPtr)^ := ResultTemp;
+              else SignalSSEExceptions(MXCSR_EFLAG_Underflow);
+              // no exception raised, return result
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16(ShiftMantissa(Mantissa or F32_MASK_INTB,14,BitsLost));
             end
           else
             begin
-              // underflow exception not masked
-              If (ResultTemp and F16_MASK_EXP) = 0 then
-                raise EF16UUnderflow.CreateDefMsg;
-              If BitsLost then
-                // inexact result
-                ExceptionSetOrRaise(excPrecision);
-              PUInt16(HalfPtr)^ := ResultTemp;
+              // result promoted to a normalized number (some bits always lost)            
+              SignalSSEExceptions(MXCSR_EFLAG_Precision);
+              PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_INTB;
             end;
         end;
 
@@ -1720,18 +1848,19 @@ case Exponent of
       }
   $8F..
   $FE:  begin
+          // post-computation exceptions
+          If Mantissa and F32_MASK_REMB = 0 then
+            SignalSSEExceptions(MXCSR_EFLAG_Overflow);
+          SignalSSEExceptions(MXCSR_EFLAG_Overflow or MXCSR_EFLAG_Precision);
+          // no exception raised, return value
           If (RoundMode = rmTruncate) or
              ((RoundMode = rmUp) and (Sign <> 0)) or
              ((RoundMode = rmDown) and (Sign = 0)) then
             // return signed largest representable number
-            ResultTemp:= UInt16(Sign shr 16) or UInt16($7BFF)
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or UInt16($7BFF)
           else
             // convert to signed infinity
-            ResultTemp := UInt16(Sign shr 16) or F16_MASK_EXP;
-          // post-computation exceptions
-          ExceptionSetOrRaise(excOverflow);
-          ExceptionSetOrRaise(excPrecision);
-          PUInt16(HalfPtr)^ := ResultTemp;
+            PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
         end;
 
         // max exponent - infinity or NaN
@@ -1741,15 +1870,10 @@ case Exponent of
             If (Mantissa and F32_MASK_FHB) = 0 then
               begin
                 // signaling NaN
-                If GetSSEExceptionMask(excInvalidOP) then
-                  begin
-                    // return quiet signed NaN with truncated mantissa
-                    SetSSEExceptionFlag(excInvalidOP,True);
-                    PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or F16_MASK_FHB or
-                                         UInt16(Mantissa shr 13);
-                  end
-                // singal NaN
-                else raise EF16UInvalidOP.CreateDefMsg;
+                SignalSSEExceptions(MXCSR_EFLAG_InvalidOp);
+                // no exception, return quiet signed NaN with truncated mantissa
+                PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or F16_MASK_FHB or
+                                     UInt16(Mantissa shr 13);
               end
             // quiet signed NaN with truncated mantisssa
             else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP or
@@ -1758,7 +1882,7 @@ case Exponent of
         // return signed infinity
         else PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or F16_MASK_EXP;
 
-else
+else 
   // exponent 113..142 (-14..+15 unbiased) - representable numbers, normalized value
   Mantissa := ShiftMantissa(Mantissa,13,BitsLost);
   // check if mantisa overflowed - if so, increase exponent to compensate
@@ -1767,17 +1891,19 @@ else
       Inc(Exponent);
       ManOverflow := True;
     end
-  else ManOverflow := False;
-  ResultTemp := UInt16(Sign shr 16) or
-                UInt16((Exponent - 112) shl 10) or
-                UInt16(Mantissa and F16_MASK_FRAC);
+  else ManOverflow := False;    
   // post-computation exceptions
+  ExcsTemp := 0;
   If ManOverflow and (Exponent > 142) then
-    // number was converted to infinity
-    ExceptionSetOrRaise(excOverflow);
+    // overflowed to infinity
+    ExcsTemp := ExcsTemp or MXCSR_EFLAG_Overflow;
   If BitsLost then
-    ExceptionSetOrRaise(excPrecision);
-  PUInt16(HalfPtr)^ := ResultTemp;
+    ExcsTemp := ExcsTemp or MXCSR_EFLAG_Precision;
+  SignalSSEExceptions(ExcsTemp);
+  // no exception raised, return result
+  PUInt16(HalfPtr)^ := UInt16(Sign shr 16) or
+                       UInt16((Exponent - 112) shl 10) or
+                       UInt16(Mantissa and F16_MASK_FRAC);
 end;
 end;
 
@@ -2152,16 +2278,86 @@ end;
 
 {-------------------------------------------------------------------------------
 ================================================================================
-                            Type half decode/encode
+                              Floats encode/decode
 ================================================================================
 -------------------------------------------------------------------------------}
 {===============================================================================
-    Type half decode/encode - declaration
+    Floats encode/decode - implementation
 ===============================================================================}
 
-procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+Function MapToFloat16(Value: UInt16): Float16;
+begin
+Result := MapWordToHalf(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapToHalf(Value: UInt16): Float16;
+begin
+Result := MapWordToHalf(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromFloat16(const Value: Float16): UInt16;
+begin
+Result := MapHalfToWord(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromHalf(const Value: Float16): UInt16;
+begin
+Result := MapHalfToWord(Value);
+end;
+
+//==============================================================================
+
+// auxiliary routine
+Function ClampExp(ExpVal: Int16; Low,High: Int16): Int16;
+begin
+If ExpVal < Low then
+  Result := Low
+else If ExpVal > High then
+  Result := High
+else
+  Result := ExpVal;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure EncodeFloat16Buffer(out Buffer; Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False);
 var
-  _Value: UInt16 absolute Value;
+  _Result:  UInt16 absolute Buffer;
+begin
+_Result := Mantissa and F16_MASK_FRAC;
+If BiasedExp then
+  _Result := _Result or ((UInt16(ClampExp(Exponent,0,31)) shl 10) and F16_MASK_EXP)
+else
+  _Result := _Result or ((UInt16(ClampExp(Exponent,-14,15) + FLOAT16_EXPONENTBIAS) shl 10) and F16_MASK_EXP);
+If Sign then
+  _Result := _Result or F16_MASK_SIGN;
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+begin
+EncodeFloat16Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+begin
+EncodeFloat16Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
+end;
+
+//==============================================================================
+
+procedure DecodeFloat16Buffer(const Buffer; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+var
+  _Value: UInt16 absolute Buffer;
 begin
 Sign := (_Value and F16_MASK_SIGN) <> 0;
 If BiasedExp then
@@ -2170,7 +2366,7 @@ else
   Exponent := ((_Value and F16_MASK_EXP) shr 10) - FLOAT16_EXPONENTBIAS;
 If IntBit then
   begin
-    If IsDenormal(Value) or IsZero(Value) then
+    If ((_Value and F16_MASK_EXP) = 0){zero or denormal} then
       Mantissa := _Value and F16_MASK_FRAC
     else
       Mantissa := (_Value and F16_MASK_FRAC) or F16_MASK_INTB;
@@ -2180,31 +2376,16 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
-DecodeFloat16(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
-end;
-
-//==============================================================================
-
-Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
-var
-  _Result:  UInt16 absolute Result;
-begin
-_Result := Mantissa and F16_MASK_FRAC;
-If BiasedExp then
-  _Result := _Result or ((Exponent shl 10) and F16_MASK_EXP)
-else
-  _Result := _Result or (((Exponent + FLOAT16_EXPONENTBIAS) shl 10) and F16_MASK_EXP); 
-If Sign then
-  _Result := _Result or F16_MASK_SIGN;
+DecodeFloat16Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
-Result := EncodeFloat16(Mantissa,Exponent,Sign,BiasedExp);
+DecodeFloat16Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 
@@ -2377,7 +2558,8 @@ try
     fnHalfToSingle,fnSingleToHalf,
     fnHalfToSingle4x,fnSingleToHalf4x:
       // SSE2 for MOVD instruction
-      Result := Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2;
+      Result := Info.SupportedExtensions.F16C and Info.SupportedExtensions.SSE2 and
+                Info.ProcessorFeatures.FXSR{FXSAVE used when obtaining MXCSR mask};
   else
     raise EF16UUnknownFunction.CreateFmt('UIM_CheckASMSupport: Unknown function (%d).',[Ord(Func)]);
   end;
