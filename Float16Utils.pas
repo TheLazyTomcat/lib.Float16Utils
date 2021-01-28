@@ -17,20 +17,21 @@
     only converts arguments given as halfs into single-precision (32bit) floats
     and operates on them.
     
-    F16C extension is used when symbol AllowF16CExtension is defined, PurePascal
-    is not defined, and when (and only when) it is supported by the CPU and OS.
+    F16C instruction extension (for x86(-64) CPUs) is used when symbol
+    AllowF16CExtension is defined, PurePascal is not defined, and when (and
+    only when) it is supported by the CPU and OS.
 
     Implemented Half conforms to IEEE 754-2008, meaning it has one sign bit
     (value is negative when sign bit is set, positive otherwise), 5 bits of
     biased exponent (exponent bias is 15) and 11 bit mantissa (10 bits
-    explicitly stored, highest bit is assumed to be zero for denormal numbers,
-    one otherwise)
+    explicitly stored, highest bit is assumed to be zero for denormal numbers
+    and zero, one otherwise)
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.0.3 (2020-11-09)
+  Version 1.1 (2021-01-28)
 
-  Last change 2021-01-27
+  Last change 2021-01-28
 
   ©2017-2021 František Milt
 
@@ -114,24 +115,6 @@ unit Float16Utils;
 }
 {$DEFINE AllowF16CExtension}
 
-{
-  H2S_Lookup
-
-  When defined, pascal implementation of Half to Single conversion is done using
-  large lookup table.
-
-  This is faster than procedural conversion, but inclusion of this table
-  increases size of the resulting binary by about 128KiB and prevents raising
-  of any unmasked floating-point exception and indication of masked exceptions
-  (result of the conversion is the same as if all exceptions would be masked).
-  If also means the conversion does not honor settings from MXCSR (rounding,
-  DAZ and FTZ modes) - the table contains values as if rounding was se to
-  nearest and both DAZ and FTZ modes were disabled.
-
-  Not defined by default.
-}
-{.$DEFINE H2S_Lookup}
-
 //------------------------------------------------------------------------------
 
 // do not touch following...
@@ -146,15 +129,16 @@ uses
   AuxTypes {contains declaration of type Half};
 
 {-------------------------------------------------------------------------------
-    Some predefined Half values
+    Some predefined Half values and other useful constants
 -------------------------------------------------------------------------------}
 const
   Infinity: Half = ($00,$7C); // positive infinity
   NaN:      Half = ($00,$7E); // quiet NaN
   MaxHalf:  Half = ($FF,$7B); // 65504
   MinHalf:  Half = ($01,$00); // 5.96046e-8
-  PosOne:   Half = ($00,$3C); // +1.0
-  NegOne:   Half = ($00,$BC); // -1.0
+  PlusOne:  Half = ($00,$3C); // +1.0
+  MinusOne: Half = ($00,$BC); // -1.0
+  One:      Half = ($00,$3C); // +1.0
   Zero:     Half = ($00,$00); // (+)0
 
   FLOAT16_EXPONENTBIAS = 15;
@@ -238,7 +222,6 @@ type
 -------------------------------------------------------------------------------}
 // some constants for MXCSR
 const
-  // MXCSR masks
   MXCSR_EFLAG_InvalidOP = UInt32($00000001);
   MXCSR_EFLAG_Denormal  = UInt32($00000002);
   MXCSR_EFLAG_DivByZero = UInt32($00000004);
@@ -814,12 +797,11 @@ const
   F32_MASK_SIGN = UInt32($80000000);
   F32_MASK_EXP  = UInt32($7F800000);
   F32_MASK_FRAC = UInt32($007FFFFF);
-{$IFNDEF FPC}
+{$IFNDEF FPC} // not used anywhere
   F32_MASK_NSGN = UInt32($7FFFFFFF);
 {$ENDIF}
   F32_MASK_FHB  = UInt32($00400000);
-  F32_MASK_INTB = UInt32($00800000);
-
+  F32_MASK_INTB = UInt32($00800000); 
   F32_MASK_REMB = UInt32($00001FFF);  // 13 bits removed from single mantissa when converting to half mantissa
 
 {===============================================================================
@@ -986,7 +968,7 @@ begin
 If not EmulatedImpl then
   begin
     // memory for FXSAVE must be 16-byte aligned and intialized to all-zero
-    Buff := AllocMem(528{512 + 16 for alignement});
+    Buff := AllocMem(528{512 + 16 for alignment});
     try
     {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
       If (PtrUInt(Buff) and PtrUInt($F)) = 0 then
@@ -1042,11 +1024,11 @@ procedure Fce_SetMXCSR_Asm(NewValue: UInt32); register; assembler;
 var
   Temp: UInt32;
 asm
- {$IFDEF x64}
+  {$IFDEF x64}
     AND       NewValue, dword ptr [RIP + MXCSR_MASK]
-{$ELSE}
+  {$ELSE}
     AND       NewValue, dword ptr [MXCSR_MASK]
- {$ENDIF}
+  {$ENDIF}
     MOV       dword ptr [Temp], NewValue
     LDMXCSR   dword ptr [Temp]
 end;
@@ -1555,13 +1537,6 @@ end;
 //------------------------------------------------------------------------------
 
 procedure Fce_HalfToSingle_Pas(HalfPtr,SinglePtr: Pointer); register;
-{$IFDEF H2S_Lookup}
-  {$INCLUDE '.\Float16Utils.inc'}
-begin
-PUInt32(SinglePtr)^ := H2S_Lookup[PUInt16(HalfPtr)^ and F16_MASK_NSGN] or
-                       UInt32(PUInt16(HalfPtr)^ and F16_MASK_SIGN) shl 16;
-end;
-{$ELSE}
 var
   Sign:           UInt16;
   Exponent:       Int32;  // biased exponent (true exponent + 15)
@@ -1634,7 +1609,6 @@ else
                          UInt32(UInt32(Mantissa) shl 13);
 end;
 end;
-{$ENDIF}
 
 //------------------------------------------------------------------------------
 
