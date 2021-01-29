@@ -29,9 +29,9 @@
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.1 (2021-01-28)
+  Version 1.1 (2021-01-29)
 
-  Last change 2021-01-28
+  Last change 2021-01-29
 
   ©2017-2021 František Milt
 
@@ -142,6 +142,7 @@ const
   Zero:     Half = ($00,$00); // (+)0
 
   FLOAT16_EXPONENTBIAS = 15;
+  FLOAT32_EXPONENTBIAS = 127;
 
 {===============================================================================
     Library-specific exceptions - declaration
@@ -263,7 +264,7 @@ procedure SetMXCSR(NewValue: UInt32);{$IF Defined(CanInline) and Defined(FPC)} i
 {
   EmulatedMXCSR
 
-  Returns true when a real MXCSR register is used, false when operating on an
+  Returns false when a real MXCSR register is used, true when operating on an
   emulated local implementation.
 }
 Function EmulatedMXCSR: Boolean;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
@@ -353,7 +354,7 @@ Function GetSSEExceptionMask(SSEException: TSSEException): Boolean;
   Sets value of selected exception mask bit in MXCSR to a NewValue and returns
   previous value of this bit.
 
-  When the bit is set (true), the slected exception will be masked and not
+  When the bit is set (true), the selected exception will be masked and not
   raised on its occurence.
   When clear (false), the exception is unmasked and can be raised.
 }
@@ -518,8 +519,8 @@ Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(F
 
 //------------------------------------------------------------------------------
 {
-  Followng two functions are expecting pointers to packed vector or four
-  singles (SinglePtr) and packed vector or four halfs (HalfPtr).
+  Following two functions are expecting pointers to packed vector of four
+  singles (SinglePtr) and packed vector of four halfs (HalfPtr).
 }
 procedure HalfToSingle4x(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 procedure SingleToHalf4x(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
@@ -609,10 +610,10 @@ Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
 ===============================================================================}
 
 Function MapToFloat16(Value: UInt16): Float16;{$IFDEF CanInline} inline;{$ENDIF}
-Function MapToHalf(Value: UInt16): Float16;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 Function MapFromFloat16(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
-Function MapFromHalf(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapFromHalf(const Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
 {
@@ -624,7 +625,7 @@ Function MapFromHalf(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$E
   biased and will be stored as is. When false, the passed exponent will be
   biased before storing.
 
-    NOTE - the valid range for exponent is -14..+15 when biased, 0..31
+    NOTE - the valid range for exponent is -15..+16 when biased, 0..31
            when unbiased. The exponent is clamped (limited to a prescribed
            range) before biasing and storing.
 
@@ -635,7 +636,7 @@ Function MapFromHalf(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$E
            masked-out before storage.
 }
 procedure EncodeFloat16Buffer(out Buffer; Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False);
-Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;{$IFDEF CanInline} inline;{$ENDIF}
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Float16;{$IFDEF CanInline} inline;{$ENDIF}
 Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 {
@@ -647,11 +648,11 @@ Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: 
   stored in the value, that is, biased. When false, the returned exponent is
   unbiased (its true value).
 
-    NOTE - returned exponent will be within range of -14..+15 when biased,
+    NOTE - returned exponent will be within range of -15..+16 when biased,
            0..31 when unbiased.
 
   When IntBit is set to true, the returned mantissa contains the integer bit
-  (bit 11) inferred from the number class (0 for denormals and zero,
+  (bit 10) inferred from the number class (0 for denormals and zero,
   1 otherwise). When false, the integer bit is masked-out and is zero,
   irrespective of actual value.
 
@@ -659,8 +660,65 @@ Function EncodeHalf(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: 
            other bits will always be zero.
 }
 procedure DecodeFloat16Buffer(const Buffer; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
-procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure DecodeFloat16(const Value: Float16; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+
+//------------------------------------------------------------------------------
+
+Function MapToFloat32(Value: UInt32): Float32;
+Function MapToSingle(Value: UInt32): Single;{$IFDEF CanInline} inline;{$ENDIF}
+
+Function MapFromFloat32(const Value: Float32): UInt32;
+Function MapFromSingle(const Value: Single): UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+
+//------------------------------------------------------------------------------
+
+{
+  EncodeFloat32Buffer
+  EncodeFloat32
+  EncodeSingle
+
+  When BiasedExp is true, it indicates that the passed exponent is already
+  biased and will be stored as is. When false, the passed exponent will be
+  biased before storing.
+
+    NOTE - the valid range for exponent is -127..+128 when biased, 0..255
+           when unbiased. The exponent is clamped (limited to a prescribed
+           range) before biasing and storing.
+
+  Integer bit, when passed in the mantissa, is ignored - it is implied for
+  single-precision float.
+
+    NOTE - only lowest 23 bits of the mantissa are used, other bits gets
+           masked-out before storage.
+}
+procedure EncodeFloat32Buffer(out Buffer; Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False);
+Function EncodeFloat32(Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float32;{$IFDEF CanInline} inline;{$ENDIF}
+Function EncodeSingle(Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Single;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  DecodeFloat32Buffer
+  DecodeFloat32
+  DecodeSingle
+
+  When BiasedExp is set to true, the returned exponent is exponent as it is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+    NOTE - returned exponent will be within range of -127..+128 when biased,
+           0..255 when unbiased.
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 23) inferred from the number class (0 for denormals and zero,
+  1 otherwise). When false, the integer bit is masked-out and is zero,
+  irrespective of actual value.
+
+    NOTE - only lowest 23 (24 with integer bit) bits of the mantissa are valid,
+           other bits will always be zero.
+}
+procedure DecodeFloat32Buffer(const Buffer; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat32(const Value: Float32; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure DecodeSingle(const Value: Single; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 
 {$IFDEF FPC}
@@ -2266,7 +2324,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function MapToHalf(Value: UInt16): Float16;
+Function MapToHalf(Value: UInt16): Half;
 begin
 Result := MapWordToHalf(Value);
 end;
@@ -2280,7 +2338,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function MapFromHalf(const Value: Float16): UInt16;
+Function MapFromHalf(const Value: Half): UInt16;
 begin
 Result := MapHalfToWord(Value);
 end;
@@ -2308,14 +2366,14 @@ _Result := Mantissa and F16_MASK_FRAC;
 If BiasedExp then
   _Result := _Result or ((UInt16(ClampExp(Exponent,0,31)) shl 10) and F16_MASK_EXP)
 else
-  _Result := _Result or ((UInt16(ClampExp(Exponent,-14,15) + FLOAT16_EXPONENTBIAS) shl 10) and F16_MASK_EXP);
+  _Result := _Result or ((UInt16(ClampExp(Exponent,-15,16) + FLOAT16_EXPONENTBIAS) shl 10) and F16_MASK_EXP);
 If Sign then
   _Result := _Result or F16_MASK_SIGN;
 end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Half;
+Function EncodeFloat16(Mantissa: UInt16; Exponent: Int8; Sign: Boolean; BiasedExp: Boolean = False): Float16;
 begin
 EncodeFloat16Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
 end;
@@ -2327,7 +2385,7 @@ begin
 EncodeFloat16Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
 end;
 
-//==============================================================================
+//------------------------------------------------------------------------------
 
 procedure DecodeFloat16Buffer(const Buffer; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
@@ -2350,7 +2408,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeFloat16(const Value: Half; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat16(const Value: Float16; out Mantissa: UInt16; out Exponent: Int8; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
 DecodeFloat16Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
@@ -2362,6 +2420,101 @@ begin
 DecodeFloat16Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
+//==============================================================================
+
+Function MapToFloat32(Value: UInt32): Float32;
+var
+  _Value: Float32 absolute Value;
+begin
+Result := _Value;
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapToSingle(Value: UInt32): Single;
+begin
+Result := MapToFloat32(Value);
+end;
+ 
+//------------------------------------------------------------------------------
+
+Function MapFromFloat32(const Value: Float32): UInt32;
+var
+  _Value: UInt32 absolute Value;
+begin
+Result := _Value;
+end;
+  
+//------------------------------------------------------------------------------
+
+Function MapFromSingle(const Value: Single): UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+begin
+Result := MapFromFloat32(Value);
+end;
+
+//==============================================================================
+
+procedure EncodeFloat32Buffer(out Buffer; Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False);
+var
+  _Result:  UInt32 absolute Buffer;
+begin
+_Result := Mantissa and F32_MASK_FRAC;
+If BiasedExp then
+  _Result := _Result or ((UInt32(ClampExp(Exponent,0,255)) shl 23) and F32_MASK_EXP)
+else
+  _Result := _Result or ((UInt32(ClampExp(Exponent,-127,128) + FLOAT32_EXPONENTBIAS) shl 23) and F32_MASK_EXP);
+If Sign then
+  _Result := _Result or F32_MASK_SIGN;
+end;
+  
+//------------------------------------------------------------------------------
+
+Function EncodeFloat32(Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float32;
+begin
+EncodeFloat32Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
+end;
+  
+//------------------------------------------------------------------------------
+
+Function EncodeSingle(Mantissa: UInt32; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Single;
+begin
+EncodeFloat32Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeFloat32Buffer(const Buffer; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+var
+  _Value: UInt32 absolute Buffer;
+begin
+Sign := (_Value and F32_MASK_SIGN) <> 0;
+If BiasedExp then
+  Exponent := (_Value and F32_MASK_EXP) shr 23
+else
+  Exponent := ((_Value and F32_MASK_EXP) shr 23) - FLOAT32_EXPONENTBIAS;
+If IntBit then
+  begin
+    If ((_Value and F32_MASK_EXP) = 0){zero or denormal} then
+      Mantissa := _Value and F32_MASK_FRAC
+    else
+      Mantissa := (_Value and F32_MASK_FRAC) or F32_MASK_INTB;
+  end
+else Mantissa := _Value and F32_MASK_FRAC;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeFloat32(const Value: Float32; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat32Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeSingle(const Value: Single; out Mantissa: UInt32; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat32Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
 
 {$IFDEF FPC}
 {-------------------------------------------------------------------------------
