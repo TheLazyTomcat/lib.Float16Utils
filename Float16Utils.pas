@@ -29,9 +29,9 @@
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.1 (2021-01-29)
+  Version 1.1.1 (2021-01-30)
 
-  Last change 2021-01-29
+  Last change 2021-01-30
 
   ©2017-2021 František Milt
 
@@ -162,7 +162,6 @@ type
     fExceptionFlags:  UInt32;
   protected
     Function DefaultMessage: String; virtual; abstract;
-    procedure ClearExceptionFlag; virtual; abstract;
   public
     constructor Create(const Msg: String);
     constructor CreateDefMsg;
@@ -177,37 +176,31 @@ type
   EF16UInvalidOp = class(EF16UFPUException) // invalid operation/operand
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
   EF16UDenormal = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
   EF16UDivByZero = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
   EF16UOverflow = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
   EF16UUnderflow = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
   EF16UPrecision = class(EF16UFPUException)
   protected
     Function DefaultMessage: String; override;
-    procedure ClearExceptionFlag; override;
   end;
 
 {-------------------------------------------------------------------------------
@@ -873,7 +866,9 @@ constructor EF16UFPUException.Create(const Msg: String);
 begin
 inherited Create(Msg);
 fExceptionFlags := GetMXCSR;
-ClearExceptionFlag;
+// these exceptions should not change e-flags in true MXCSR when it is not used
+If EmulatedMXCSR then
+  ClearSSEExceptions;
 end;
 
 //------------------------------------------------------------------------------
@@ -892,27 +887,11 @@ begin
 Result := 'Invalid floating point operand';
 end;
 
-//------------------------------------------------------------------------------
-
-procedure EF16UInvalidOp.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excInvalidOP,False);
-end;
-
 //==============================================================================
 
 Function EF16UDenormal.DefaultMessage: String;
 begin
 Result := 'Denormal floating point operand';
-end;
-
-//------------------------------------------------------------------------------
-
-procedure EF16UDenormal.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excDenormal,False);
 end;
 
 //==============================================================================
@@ -922,27 +901,11 @@ begin
 Result := 'Floating point division by zero';
 end;
 
-//------------------------------------------------------------------------------
-
-procedure EF16UDivByZero.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excDivByZero,False);
-end;
-
 //==============================================================================
 
 Function EF16UOverflow.DefaultMessage: String;
 begin
 Result := 'Floating point arithmetic overflow';
-end;
-
-//------------------------------------------------------------------------------
-
-procedure EF16UOverflow.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excOverflow,False);
 end;
 
 //==============================================================================
@@ -952,27 +915,11 @@ begin
 Result := 'Floating point arithmetic underflow';
 end;
 
-//------------------------------------------------------------------------------
-
-procedure EF16UUnderflow.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excUnderflow,False);
-end;
-
 //==============================================================================
 
 Function EF16UPrecision.DefaultMessage: String;
 begin
 Result := 'Inexact floating point result';
-end;
-
-//------------------------------------------------------------------------------
-
-procedure EF16UPrecision.ClearExceptionFlag;
-begin
-If EmulatedMXCSR then
-  SetSSEExceptionFlag(excPrecision,False);
 end;
 
 {-------------------------------------------------------------------------------
