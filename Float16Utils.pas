@@ -156,6 +156,12 @@ type
 {-------------------------------------------------------------------------------
     Library-specific exceptions - floating-point exceptions
 -------------------------------------------------------------------------------}
+{
+  When this exception (and its descendants) is created by calling a constructor
+  that does not end with "NoClear", and when the MXCSR register is currently
+  emulated, all exception flag bits will be cleared.
+  When created using "NoClear" constructor, no exception flag bit is changed.
+}
 type
   EF16UFPUException = class(EF16UException)
   private
@@ -167,7 +173,7 @@ type
     constructor Create(const Msg: String);
     constructor CreateDefMsgNoClear({$IFNDEF FPC}Dummy: Integer = 0{$ENDIF});
     constructor CreateDefMsg;
-    // ExceptionFlags holds state of exception flags when this exception was created
+    // ExceptionFlags holds state of exception flags before this exception was created
     property ExceptionFlags: UInt32 read fExceptionFlags;
   end;
 
@@ -490,7 +496,7 @@ procedure RaiseSSEExceptions(var MXCSR: UInt32; Mask: Boolean = True); overload;
 
   Calls the first overload with an input being current value of MXCSR (be it
   real register or emulation).
-  MXCSR register CAN be changed by this function.
+  Note that MXCSR register is NOT affected by this function.
 }
 procedure RaiseSSEExceptions(Mask: Boolean = True); overload;{$IFDEF CanInline} inline;{$ENDIF}
 
@@ -1484,7 +1490,6 @@ var
 begin
 TempMXCSR := GetMXCSR;
 RaiseSSEExceptions(TempMXCSR,Mask);
-SetMXCSR(TempMXCSR)
 end;
 
 {-------------------------------------------------------------------------------
