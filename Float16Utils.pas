@@ -29,9 +29,9 @@
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.1.1 (2021-01-30)
+  Version 1.1.1 (2021-01-31)
 
-  Last change 2021-01-30
+  Last change 2021-01-31
 
   ©2017-2021 František Milt
 
@@ -163,7 +163,9 @@ type
   protected
     Function DefaultMessage: String; virtual; abstract;
   public
+    constructor CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer = 0{$ENDIF});
     constructor Create(const Msg: String);
+    constructor CreateDefMsgNoClear({$IFNDEF FPC}Dummy: Integer = 0{$ENDIF});
     constructor CreateDefMsg;
     // ExceptionFlags holds state of exception flags when this exception was created
     property ExceptionFlags: UInt32 read fExceptionFlags;
@@ -461,10 +463,17 @@ procedure ClearSSEExceptions;{$IFDEF CanInline} inline;{$ENDIF}
 
   Raises first encountered exception according to flags set in the passed MXCSR.
 
+  Parameter Mask controls whether to honor exception masking (true) or not
+  (false) when raising an exception (when honored, the masked exceptions are
+  NOT raised, when not honored, all exceptions can be raised, even those
+  masked).
+  Mask bits are taken from the parameter MXCSR, not from the actual register.
+
   The exception flag bits are traversed one by one and, when a set bit is
-  encountered, it is cleared and a corresponding exception is raised.
+  encountered, it is cleared and a corresponding exception is raised (if
+  allowed by masking - see parameter Mask).
   Only one exception is raised in each call, even when multiple bits are set.
-  The order in which the bits are traversed and therefore the order of
+  The order in which the bits are traversed, and therefore the order of
   exception raising is:
 
     InvalidOP
@@ -474,15 +483,16 @@ procedure ClearSSEExceptions;{$IFDEF CanInline} inline;{$ENDIF}
     Overflow
     Precision
 }
-procedure RaiseSSEExceptions(var MXCSR: UInt32); overload;
+procedure RaiseSSEExceptions(var MXCSR: UInt32; Mask: Boolean = True); overload;
 
 {
   RaiseSSEExceptions
 
-  Operates exactly the same as the first overload, but directly on the current
-  MXCSR (be it real register or emulation).
+  Calls the first overload with an input being current value of MXCSR (be it
+  real register or emulation).
+  MXCSR register CAN be changed by this function.
 }
-procedure RaiseSSEExceptions; overload;
+procedure RaiseSSEExceptions(Mask: Boolean = True); overload;{$IFDEF CanInline} inline;{$ENDIF}
 
 {-------------------------------------------------------------------------------
     Auxiliary routines - conversion functions
@@ -862,13 +872,27 @@ const
     Library-specific exceptions - floating-point exceptions
 -------------------------------------------------------------------------------}
 
-constructor EF16UFPUException.Create(const Msg: String);
+constructor EF16UFPUException.CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer{$ENDIF});
 begin
 inherited Create(Msg);
 fExceptionFlags := GetMXCSR;
+end;
+
+//------------------------------------------------------------------------------
+
+constructor EF16UFPUException.Create(const Msg: String);
+begin
+CreateNoClear(Msg);
 // these exceptions should not change e-flags in true MXCSR when it is not used
 If EmulatedMXCSR then
   ClearSSEExceptions;
+end;
+
+//------------------------------------------------------------------------------
+
+constructor EF16UFPUException.CreateDefMsgNoClear({$IFNDEF FPC}Dummy: Integer{$ENDIF});
+begin
+CreateNoClear(DefaultMessage);
 end;
 
 //------------------------------------------------------------------------------
@@ -1418,77 +1442,49 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure RaiseSSEExceptions(var MXCSR: UInt32);
+procedure RaiseSSEExceptions(var MXCSR: UInt32; Mask: Boolean = True);
 begin
-If (MXCSR and MXCSR_EFLAG_InvalidOP) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_InvalidOP) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_InvalidOP) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_InvalidOP;
-    raise EF16UInvalidOp.CreateDefMsg;
+    raise EF16UInvalidOp.CreateDefMsgNoClear;
   end;
-If (MXCSR and MXCSR_EFLAG_Denormal) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_Denormal) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_Denormal) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_Denormal;
-    raise EF16UDenormal.CreateDefMsg;
+    raise EF16UDenormal.CreateDefMsgNoClear;
   end;
-If (MXCSR and MXCSR_EFLAG_DivByZero) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_DivByZero) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_DivByZero) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_DivByZero;
-    raise EF16UDivByZero.CreateDefMsg;
+    raise EF16UDivByZero.CreateDefMsgNoClear;
   end;
-If (MXCSR and MXCSR_EFLAG_Overflow) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_Overflow) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_Overflow) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_Overflow;
-    raise EF16UOverflow.CreateDefMsg;
+    raise EF16UOverflow.CreateDefMsgNoClear;
   end;
-If (MXCSR and MXCSR_EFLAG_Underflow) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_Underflow) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_Underflow) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_Underflow;
-    raise EF16UUnderflow.CreateDefMsg;
+    raise EF16UUnderflow.CreateDefMsgNoClear;
   end;
-If (MXCSR and MXCSR_EFLAG_Precision) <> 0 then
+If ((MXCSR and MXCSR_EFLAG_Precision) <> 0) and (not Mask or ((MXCSR and MXCSR_EMASK_Precision) = 0)) then
   begin
     MXCSR := MXCSR and not MXCSR_EFLAG_Precision;
-    raise EF16UPrecision.CreateDefMsg;
+    raise EF16UPrecision.CreateDefMsgNoClear;
   end;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-procedure RaiseSSEExceptions;
+procedure RaiseSSEExceptions(Mask: Boolean = True);
 var
-  MXCSR:  UInt32;
+  TempMXCSR:  UInt32;
 begin
-MXCSR := GetMXCSR;
-If (MXCSR and MXCSR_EFLAG_InvalidOP) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_InvalidOP);
-    raise EF16UInvalidOp.CreateDefMsg;
-  end;
-If (MXCSR and MXCSR_EFLAG_Denormal) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_Denormal);
-    raise EF16UDenormal.CreateDefMsg;
-  end;
-If (MXCSR and MXCSR_EFLAG_DivByZero) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_DivByZero);
-    raise EF16UDivByZero.CreateDefMsg;
-  end;
-If (MXCSR and MXCSR_EFLAG_Overflow) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_Overflow);
-    raise EF16UOverflow.CreateDefMsg;
-  end;
-If (MXCSR and MXCSR_EFLAG_Underflow) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_Underflow);
-    raise EF16UUnderflow.CreateDefMsg;
-  end;
-If (MXCSR and MXCSR_EFLAG_Precision) <> 0 then
-  begin
-    SetMXCSR(MXCSR and not MXCSR_EFLAG_Precision);
-    raise EF16UPrecision.CreateDefMsg;
-  end;
+TempMXCSR := GetMXCSR;
+RaiseSSEExceptions(TempMXCSR,Mask);
+SetMXCSR(TempMXCSR)
 end;
 
 {-------------------------------------------------------------------------------
