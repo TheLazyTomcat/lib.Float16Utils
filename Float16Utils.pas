@@ -504,35 +504,49 @@ procedure RaiseSSEExceptions(Mask: Boolean = True); overload;{$IFDEF CanInline} 
     Auxiliary routines - conversion functions
 -------------------------------------------------------------------------------}
 {
+  MapFloat16ToWord
   MapHalfToWord
 
-  Directly maps type half to a 16bit unsigned integer - no convesion is done.
+  Directly maps type half (float16) to a 16bit unsigned integer - no convesion
+  is done.
 }
+Function MapFloat16ToWord(Value: Float16): UInt16;
 Function MapHalfToWord(Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
+
 {
+  MapWordToFloat16
   MapWordToHalf
 
-  Directly maps 16bit unsigned integer to type half - no convesion is done.
+  Directly maps 16bit unsigned integer to type half (float16) - no convesion
+  is done.
 }
+Function MapWordToFloat16(Value: UInt16): Float16;
 Function MapWordToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
 
+procedure Float16ToFloat32(Float16Ptr,Float32Ptr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 procedure HalfToSingle(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
+
+procedure Float32ToFloat16(Float32Ptr,Float16Ptr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 procedure SingleToHalf(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 
-//------------------------------------------------------------------------------
-
+Function Float16ToFloat32(Value: Float16): Float32;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 Function HalfToSingle(Value: Half): Single;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
+
+Function Float32ToFloat16(Value: Float32): Float16;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 Function SingleToHalf(Value: Single): Half;{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND} overload;
 
 //------------------------------------------------------------------------------
 {
-  Following two functions are expecting pointers to packed vector of four
-  singles (SinglePtr) and packed vector of four halfs (HalfPtr).
+  Following functions are expecting pointers to packed vector of four singles
+  (SinglePtr, Float32Ptr) and packed vector of four halfs (HalfPtr, Float16Ptr).
 }
-procedure HalfToSingle4x(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
-procedure SingleToHalf4x(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure Float16ToFloat32Vec4(Float16Ptr,Float32Ptr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure HalfToSingleVec4(HalfPtr,SinglePtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+
+procedure Float32ToFloat16Vec4(Float32Ptr,Float16Ptr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
+procedure SingleToHalfVec4(SinglePtr,HalfPtr: Pointer);{$IF Defined(CanInline) and Defined(FPC)} inline;{$IFEND}
 
 {-------------------------------------------------------------------------------
 ================================================================================
@@ -1987,16 +2001,41 @@ var
 
 //==============================================================================
 
+Function MapFloat16ToWord(Value: Float16): UInt16;
+var
+  _Value: UInt16 absolute Value;
+begin
+Result := _Value;
+end;
+
+//------------------------------------------------------------------------------
+
 Function MapHalfToWord(Value: Half): UInt16;
 begin
-Result := UInt16(Addr(Value)^);
+Result := MapFloat16ToWord(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapWordToFloat16(Value: UInt16): Float16;
+var
+  _Result: UInt16 absolute Result;
+begin
+_Result := Value;
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapWordToHalf(Value: UInt16): Half;
 begin
-Result := Half(Addr(Value)^);
+Result := MapWordToFloat16(Value);
+end;
+
+//==============================================================================
+
+procedure Float16ToFloat32(Float16Ptr,Float32Ptr: Pointer);
+begin
+Var_HalfToSingle(Float16Ptr,Float32Ptr);
 end;
 
 //------------------------------------------------------------------------------
@@ -2008,9 +2047,23 @@ end;
 
 //------------------------------------------------------------------------------
 
+procedure Float32ToFloat16(Float32Ptr,Float16Ptr: Pointer);
+begin
+Var_SingleToHalf(Float32Ptr,Float16Ptr);
+end;
+
+//------------------------------------------------------------------------------
+
 procedure SingleToHalf(SinglePtr,HalfPtr: Pointer);
 begin
 Var_SingleToHalf(SinglePtr,HalfPtr);
+end;
+
+//------------------------------------------------------------------------------
+
+Function Float16ToFloat32(Value: Float16): Float32;
+begin
+Var_HalfToSingle(@Value,@Result);
 end;
 
 //------------------------------------------------------------------------------
@@ -2022,21 +2075,42 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function SingleToHalf(Value: Single): Half;
+Function Float32ToFloat16(Value: Float32): Float16;
 begin
 Var_SingleToHalf(@Value,@Result);
 end;
 
 //------------------------------------------------------------------------------
 
-procedure HalfToSingle4x(HalfPtr,SinglePtr: Pointer);
+Function SingleToHalf(Value: Single): Half;
+begin
+Var_SingleToHalf(@Value,@Result);
+end;
+
+//==============================================================================
+
+procedure Float16ToFloat32Vec4(Float16Ptr,Float32Ptr: Pointer);
+begin
+Var_HalfToSingle4x(Float16Ptr,Float32Ptr);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure HalfToSingleVec4(HalfPtr,SinglePtr: Pointer);
 begin
 Var_HalfToSingle4x(HalfPtr,SinglePtr);
 end;
 
 //------------------------------------------------------------------------------
 
-procedure SingleToHalf4x(SinglePtr,HalfPtr: Pointer);
+procedure Float32ToFloat16Vec4(Float32Ptr,Float16Ptr: Pointer);
+begin
+Var_SingleToHalf4x(Float32Ptr,Float16Ptr);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SingleToHalfVec4(SinglePtr,HalfPtr: Pointer);
 begin
 Var_SingleToHalf4x(SinglePtr,HalfPtr);
 end;
