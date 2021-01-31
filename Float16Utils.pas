@@ -618,9 +618,11 @@ Function Divide(const A,B: Half): Half;{$IFDEF CanInline} inline;{$ENDIF}
     Floats encode/decode - declaration
 ===============================================================================}
 
+procedure MapToFloat16Buffer(out Buffer; Value: UInt16);
 Function MapToFloat16(Value: UInt16): Float16;{$IFDEF CanInline} inline;{$ENDIF}
 Function MapToHalf(Value: UInt16): Half;{$IFDEF CanInline} inline;{$ENDIF}
 
+Function MapFromFloat16Buffer(const Buffer): UInt16;
 Function MapFromFloat16(const Value: Float16): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
 Function MapFromHalf(const Value: Half): UInt16;{$IFDEF CanInline} inline;{$ENDIF}
 
@@ -674,10 +676,12 @@ procedure DecodeHalf(const Value: Half; out Mantissa: UInt16; out Exponent: Int8
 
 //------------------------------------------------------------------------------
 
-Function MapToFloat32(Value: UInt32): Float32;
+procedure MapToFloat32Buffer(out Buffer; Value: UInt32);
+Function MapToFloat32(Value: UInt32): Float32;{$IFDEF CanInline} inline;{$ENDIF}
 Function MapToSingle(Value: UInt32): Single;{$IFDEF CanInline} inline;{$ENDIF}
 
-Function MapFromFloat32(const Value: Float32): UInt32;
+Function MapFromFloat32Buffer(const Buffer): UInt32;
+Function MapFromFloat32(const Value: Float32): UInt32;{$IFDEF CanInline} inline;{$ENDIF}
 Function MapFromSingle(const Value: Single): UInt32;{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -2265,30 +2269,48 @@ end;
     Floats encode/decode - implementation
 ===============================================================================}
 
+procedure MapToFloat16Buffer(out Buffer; Value: UInt16);
+var
+  _Result:  UInt16 absolute Buffer;
+begin
+_Result := Value;
+end;
+
+//------------------------------------------------------------------------------
+
 Function MapToFloat16(Value: UInt16): Float16;
 begin
-Result := MapWordToHalf(Value);
+MapToFloat16Buffer(Result,Value);
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapToHalf(Value: UInt16): Half;
 begin
-Result := MapWordToHalf(Value);
+MapToFloat16Buffer(Result,Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromFloat16Buffer(const Buffer): UInt16;
+var
+  _Value: UInt16 absolute Buffer;
+begin
+Result := _Value;
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapFromFloat16(const Value: Float16): UInt16;
 begin
-Result := MapHalfToWord(Value);
+Result := MapFromFloat16Buffer(Value);
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapFromHalf(const Value: Half): UInt16;
 begin
-Result := MapHalfToWord(Value);
+Result := MapFromFloat16Buffer(Value);
 end;
 
 //==============================================================================
@@ -2370,34 +2392,48 @@ end;
 
 //==============================================================================
 
-Function MapToFloat32(Value: UInt32): Float32;
+procedure MapToFloat32Buffer(out Buffer; Value: UInt32);
 var
-  _Value: Float32 absolute Value;
+  _Result: UInt32 absolute Buffer;
 begin
-Result := _Value;
+_Result := Value;
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapToFloat32(Value: UInt32): Float32;
+begin
+MapToFloat32Buffer(Result,Value);
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapToSingle(Value: UInt32): Single;
 begin
-Result := MapToFloat32(Value);
+MapToFloat32Buffer(Result,Value);
 end;
  
 //------------------------------------------------------------------------------
 
-Function MapFromFloat32(const Value: Float32): UInt32;
+Function MapFromFloat32Buffer(const Buffer): UInt32;
 var
-  _Value: UInt32 absolute Value;
+  _Value: UInt32 absolute Buffer;
 begin
 Result := _Value;
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromFloat32(const Value: Float32): UInt32;
+begin
+Result := MapFromFloat32Buffer(Value);
 end;
   
 //------------------------------------------------------------------------------
 
-Function MapFromSingle(const Value: Single): UInt32;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapFromSingle(const Value: Single): UInt32;
 begin
-Result := MapFromFloat32(Value);
+Result := MapFromFloat32Buffer(Value);
 end;
 
 //==============================================================================
