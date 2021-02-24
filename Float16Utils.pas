@@ -29,9 +29,9 @@
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.1.1 (2021-01-31)
+  Version 1.1.2 (2021-02-24)
 
-  Last change 2021-01-31
+  Last change 2021-02-24
 
   ©2017-2021 František Milt
 
@@ -899,7 +899,7 @@ const
 constructor EF16UFPUException.CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer{$ENDIF});
 begin
 inherited Create(Msg);
-fExceptionFlags := GetMXCSR;
+fExceptionFlags := GetMXCSR and $3F;
 end;
 
 //------------------------------------------------------------------------------
