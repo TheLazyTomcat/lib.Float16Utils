@@ -29,9 +29,9 @@
 
       NOTE - type Half is declared in unit AuxTypes, not here.
 
-  Version 1.1.2 (2021-02-24)
+  Version 1.1.3 (2021-09-15)
 
-  Last change 2021-02-24
+  Last change 2021-09-15
 
   ©2017-2021 František Milt
 
@@ -998,7 +998,7 @@ asm
 {
   - FXSAVE does not check for pending FPU exceptions, therefore added FWAIT to
     be sure
-  - state saved by FXSAVE can contain MXCSR_MASK provided by the CPU (it if is
+  - state saved by FXSAVE can contain MXCSR_MASK provided by the CPU (if it is
     zero, CPU is not providing it)
   - position of the mask is the same in all CPU modes (offset 28) - no need to
     branch for individual modes
@@ -1117,8 +1117,8 @@ end;
 //------------------------------------------------------------------------------
 
 var
-  Var_GetMXCSR: Function: UInt32; register;
-  Var_SetMXCSR: procedure(NewValue: UInt32); register;
+  Var_GetMXCSR: Function: UInt32; register = Fce_GetMXCSR_Pas;
+  Var_SetMXCSR: procedure(NewValue: UInt32); register = Fce_SetMXCSR_Pas;
 
 {--  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
     Low-level access
@@ -1994,10 +1994,10 @@ end;
 //==============================================================================
 
 var
-  Var_HalfToSingle:   procedure(HalfPtr,SinglePtr: Pointer); register;
-  Var_SingleToHalf:   procedure(SinglePtr,HalfPtr: Pointer); register;
-  Var_HalfToSingle4x: procedure(HalfPtr,SinglePtr: Pointer); register;
-  Var_SingleToHalf4x: procedure(SinglePtr,HalfPtr: Pointer); register;
+  Var_HalfToSingle:   procedure(HalfPtr,SinglePtr: Pointer); register = Fce_HalfToSingle_Pas;
+  Var_SingleToHalf:   procedure(SinglePtr,HalfPtr: Pointer); register = Fce_SingleToHalf_Pas;
+  Var_HalfToSingle4x: procedure(HalfPtr,SinglePtr: Pointer); register = Fce_HalfToSingle4x_Pas;
+  Var_SingleToHalf4x: procedure(SinglePtr,HalfPtr: Pointer); register = Fce_SingleToHalf4x_Pas;
 
 //==============================================================================
 
