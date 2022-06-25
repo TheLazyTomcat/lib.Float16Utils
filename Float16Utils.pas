@@ -31,9 +31,9 @@
 
   Version 1.1.3 (2021-09-15)
 
-  Last change 2021-09-15
+  Last change 2022-06-25
 
-  ©2017-2021 František Milt
+  ©2017-2022 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -112,8 +112,14 @@ unit Float16Utils;
   Has no meaning when PurePascal symbol is defined.
 
   Defined by default.
+
+  To disable/undefine this symbol in a project without changing this library,
+  define project-wide symbol Float16Utils_AllowF16CExtension_Off.
 }
 {$DEFINE AllowF16CExtension}
+{$IFDEF Float16Utils_AllowF16CExtension_Off}
+  {$UNDEF AllowF16CExtension}
+{$ENDIF}
 
 //------------------------------------------------------------------------------
 
