@@ -7,7 +7,7 @@
 -------------------------------------------------------------------------------}
 {===============================================================================
 
-  Float16
+  Float16Utils
 
     Main purpose of this library is to provide routines for conversion from and
     to half precision (16bit) floating point numbers (Single -> Half, Half ->
@@ -31,7 +31,7 @@
 
   Version 1.1.3 (2021-09-15)
 
-  Last change 2022-06-25
+  Last change 2022-09-13
 
   ©2017-2022 František Milt
 
@@ -170,9 +170,8 @@ type
 }
 type
   EF16UFPUException = class(EF16UException)
-  private
-    fExceptionFlags:  UInt32;
   protected
+    fExceptionFlags:  UInt32;
     Function DefaultMessage: String; virtual; abstract;
   public
     constructor CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer = 0{$ENDIF});
